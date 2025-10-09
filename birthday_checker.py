@@ -81,7 +81,7 @@ def update_lunar_solar_dates():
 
     # Ghi lại toàn bộ dữ liệu vào sheet
     if updated_data != data:  # Chỉ ghi nếu có thay đổi
-        update_sheet_data(updated_data, 'Sheet1!A:D')
+        update_sheet_data(updated_data, 'Trang tính1!A:D')
 
 # Kiểm tra sinh nhật
 def check_birthdays(target_date, is_tomorrow=False):
