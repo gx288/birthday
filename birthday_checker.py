@@ -10,7 +10,7 @@ from lunarcalendar import Converter, Solar, Lunar
 
 # Cấu hình
 SHEET_ID = '1nWnCXcKhFh1uRgkcs_qEQCGbZkTdyxL_WD8laSi6kok'
-RANGE_NAME = 'Trang tính1!A:C'  # Cột A:C (Họ tên, Dương lịch, Âm lịch)
+RANGE_NAME = 'Trang tính1!A:D'  # Cột A:D (Họ tên, Dương lịch, Âm lịch, Dương lịch từ âm lịch)
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
@@ -23,6 +23,21 @@ def get_sheet_data():
     sheet = service.spreadsheets()
     result = sheet.values().get(spreadsheetId=SHEET_ID, range=RANGE_NAME).execute()
     return result.get('values', [])
+
+# Ghi dữ liệu vào Google Sheet
+def update_sheet_data(values, range_name):
+    creds_json = os.getenv('GOOGLE_CREDENTIALS')
+    creds_dict = json.loads(creds_json)
+    creds = Credentials.from_service_account_info(creds_dict)
+    service = build('sheets', 'v4', credentials=creds)
+    sheet = service.spreadsheets()
+    body = {'values': values}
+    sheet.values().update(
+        spreadsheetId=SHEET_ID,
+        range=range_name,
+        valueInputOption='RAW',
+        body=body
+    ).execute()
 
 # Gửi thông báo Telegram
 async def send_telegram_message(message):
@@ -39,17 +54,45 @@ def convert_lunar_to_solar(lunar_day, lunar_month, lunar_year, target_year):
     except ValueError:
         return None
 
+# Cập nhật cột Dương lịch từ âm lịch
+def update_lunar_solar_dates():
+    current_year = datetime.now().year
+    data = get_sheet_data()
+    updated_data = data.copy()
+
+    for i, row in enumerate(data[1:], start=1):  # Bỏ hàng tiêu đề
+        lunar_date = row[2] if len(row) > 2 else ''
+        if lunar_date:
+            try:
+                lunar_parts = lunar_date.split('/')
+                lunar_day = int(lunar_parts[0])
+                lunar_month = int(lunar_parts[1])
+                lunar_year = int(lunar_parts[2])
+                solar_from_lunar = convert_lunar_to_solar(lunar_day, lunar_month, lunar_year, current_year)
+                if solar_from_lunar:
+                    # Định dạng dd/mm/yyyy
+                    solar_date_str = solar_from_lunar.strftime('%d/%m/%Y')
+                    # Cập nhật cột D
+                    while len(updated_data[i]) < 4:  # Đảm bảo đủ cột
+                        updated_data[i].append('')
+                    updated_data[i][3] = solar_date_str
+            except (ValueError, IndexError):
+                pass
+
+    # Ghi lại toàn bộ dữ liệu vào sheet
+    if updated_data != data:  # Chỉ ghi nếu có thay đổi
+        update_sheet_data(updated_data, 'Sheet1!A:D')
+
 # Kiểm tra sinh nhật
 def check_birthdays(target_date, is_tomorrow=False):
     target_month_day = target_date.strftime('%m/%d')
-    current_year = target_date.year
     data = get_sheet_data()
     birthdays = []
 
     for row in data[1:]:
         name = row[0]
         solar_date = row[1] if len(row) > 1 else ''
-        lunar_date = row[2] if len(row) > 2 else ''
+        lunar_solar_date = row[3] if len(row) > 3 else ''
 
         if solar_date:
             try:
@@ -59,22 +102,21 @@ def check_birthdays(target_date, is_tomorrow=False):
             except ValueError:
                 pass
 
-        if lunar_date:
+        if lunar_solar_date:
             try:
-                lunar_parts = lunar_date.split('/')
-                lunar_day = int(lunar_parts[0])
-                lunar_month = int(lunar_parts[1])
-                lunar_year = int(lunar_parts[2])
-                solar_from_lunar = convert_lunar_to_solar(lunar_day, lunar_month, lunar_year, current_year)
-                if solar_from_lunar and solar_from_lunar.strftime('%m/%d') == target_month_day:
-                    birthdays.append(f"{name} (Âm lịch: {lunar_date})")
-            except (ValueError, IndexError):
+                lunar_solar_month_day = datetime.strptime(lunar_solar_date, '%d/%m/%Y').strftime('%m/%d')
+                if lunar_solar_month_day == target_month_day:
+                    birthdays.append(f"{name} (Âm lịch: {row[2]})")
+            except ValueError:
                 pass
 
     return birthdays
 
 # Hàm chính
 async def main():
+    # Cập nhật cột Dương lịch từ âm lịch
+    update_lunar_solar_dates()
+
     today = datetime.now()
     tomorrow = today + timedelta(days=1)
     
