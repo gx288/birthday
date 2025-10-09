@@ -1,8 +1,8 @@
 name: Check Birthdays
 on:
   schedule:
-    - cron: '0 1 * * *'  # 8:00 AM giờ Việt Nam (1:00 AM UTC)
-    - cron: '0 13 * * *' # 8:00 PM giờ Việt Nam (1:00 PM UTC)
+    - cron: '0 12 * * *'  # 8:00 AM giờ Việt Nam (1:00 AM UTC)
+    - cron: '0 22 * * *' # 8:00 PM giờ Việt Nam (1:00 PM UTC)
   workflow_dispatch:
 
 jobs:
