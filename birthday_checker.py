@@ -12,7 +12,7 @@ from lunarcalendar import Converter, Solar, Lunar
 # Cấu hình
 SHEET_ID = '1nWnCXcKhFh1uRgkcs_qEQCGbZkTdyxL_WD8laSi6kok'
 SHEET_NAME = 'Trang tính1'
-RANGE_NAME = f'{SHEET_NAME}!A:D'
+RANGE_NAME = f'{SHEET_NAME}!A:E'
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
@@ -66,21 +66,21 @@ async def send_telegram_message(message):
         raise
 
 # Chuyển đổi ngày âm lịch sang dương lịch
-def convert_lunar_to_solar(lunar_day, lunar_month, lunar_year, target_year):
+def convert_lunar_to_solar(lunar_day, lunar_month, target_year):
     try:
-        lunar = Lunar(lunar_year, lunar_month, lunar_day, isleap=False)
+        lunar = Lunar(target_year, lunar_month, lunar_day, isleap=False)
         solar = Converter.Lunar2Solar(lunar)
         solar_datetime = datetime(solar.year, solar.month, solar.day)
-        solar_datetime = solar_datetime.replace(year=target_year)
-        print(f"Converted lunar {lunar_day}/{lunar_month}/{lunar_year} to solar {solar_datetime.strftime('%d/%m/%Y')}")
+        print(f"Converted lunar {lunar_day}/{lunar_month}/{target_year} to solar {solar_datetime.strftime('%d/%m/%Y')}")
         return solar_datetime
     except ValueError as e:
-        print(f"Error converting lunar date: {e}")
+        print(f"Error converting lunar date {lunar_day}/{lunar_month}/{target_year}: {e}")
         return None
 
-# Cập nhật cột Dương lịch từ âm lịch
+# Cập nhật cột D (năm trước) và E (năm hiện tại)
 def update_lunar_solar_dates():
     current_year = datetime.now().year
+    previous_year = current_year - 1
     data = get_sheet_data()
     updated_data = data.copy()
     updated = False
@@ -95,16 +95,18 @@ def update_lunar_solar_dates():
                     continue
                 lunar_day = int(lunar_parts[0])
                 lunar_month = int(lunar_parts[1])
-                lunar_year = int(lunar_parts[2])
-                solar_from_lunar = convert_lunar_to_solar(lunar_day, lunar_month, lunar_year, current_year)
-                if solar_from_lunar:
-                    solar_date_str = solar_from_lunar.strftime('%d/%m/%Y')
-                    while len(updated_data[i]) < 4:
-                        updated_data[i].append('')
-                    if updated_data[i][3] != solar_date_str:
-                        updated_data[i][3] = solar_date_str
-                        updated = True
-                        print(f"Updated row {i+1} column D: {solar_date_str}")
+                # Chuyển đổi cho năm trước và năm hiện tại
+                solar_prev_year = convert_lunar_to_solar(lunar_day, lunar_month, previous_year)
+                solar_curr_year = convert_lunar_to_solar(lunar_day, lunar_month, current_year)
+                while len(updated_data[i]) < 5:
+                    updated_data[i].append('')
+                prev_year_str = solar_prev_year.strftime('%d/%m/%Y') if solar_prev_year else ''
+                curr_year_str = solar_curr_year.strftime('%d/%m/%Y') if solar_curr_year else ''
+                if updated_data[i][3] != prev_year_str or updated_data[i][4] != curr_year_str:
+                    updated_data[i][3] = prev_year_str
+                    updated_data[i][4] = curr_year_str
+                    updated = True
+                    print(f"Updated row {i+1}: D={prev_year_str}, E={curr_year_str}")
             except (ValueError, IndexError) as e:
                 print(f"Error processing lunar date for row {i+1}: {e}")
                 continue
@@ -112,7 +114,7 @@ def update_lunar_solar_dates():
     if updated:
         update_sheet_data(updated_data)
     else:
-        print("No updates needed for column D")
+        print("No updates needed for columns D and E")
 
 # Kiểm tra sinh nhật
 def check_birthdays(target_date, is_tomorrow=False):
@@ -123,7 +125,8 @@ def check_birthdays(target_date, is_tomorrow=False):
     for i, row in enumerate(data[1:], start=1):
         name = row[0]
         solar_date = row[1] if len(row) > 1 else ''
-        lunar_solar_date = row[3] if len(row) > 3 else ''
+        lunar_solar_prev = row[3] if len(row) > 3 else ''
+        lunar_solar_curr = row[4] if len(row) > 4 else ''
 
         if solar_date:
             try:
@@ -135,15 +138,26 @@ def check_birthdays(target_date, is_tomorrow=False):
                 print(f"Invalid solar date format for row {i+1}: {solar_date}")
                 pass
 
-        if lunar_solar_date:
+        if lunar_solar_prev:
             try:
-                lunar_solar_month_day = datetime.strptime(lunar_solar_date.strip(), '%d/%m/%Y').strftime('%m/%d')
+                lunar_solar_month_day = datetime.strptime(lunar_solar_prev.strip(), '%d/%m/%Y').strftime('%m/%d')
                 if lunar_solar_month_day == target_month_day:
                     lunar_date = row[2] if len(row) > 2 else 'Unknown'
-                    birthdays.append(f"{name} (Âm lịch: {lunar_date})")
-                    print(f"Found lunar birthday for {name}: {lunar_date} -> {lunar_solar_date}")
+                    birthdays.append(f"{name} (Âm lịch: {lunar_date}, Năm {target_date.year - 1})")
+                    print(f"Found lunar birthday for {name}: {lunar_date} -> {lunar_solar_prev}")
             except ValueError:
-                print(f"Invalid lunar solar date format for row {i+1}: {lunar_solar_date}")
+                print(f"Invalid lunar solar date (prev year) for row {i+1}: {lunar_solar_prev}")
+                pass
+
+        if lunar_solar_curr:
+            try:
+                lunar_solar_month_day = datetime.strptime(lunar_solar_curr.strip(), '%d/%m/%Y').strftime('%m/%d')
+                if lunar_solar_month_day == target_month_day:
+                    lunar_date = row[2] if len(row) > 2 else 'Unknown'
+                    birthdays.append(f"{name} (Âm lịch: {lunar_date}, Năm {target_date.year})")
+                    print(f"Found lunar birthday for {name}: {lunar_date} -> {lunar_solar_curr}")
+            except ValueError:
+                print(f"Invalid lunar solar date (curr year) for row {i+1}: {lunar_solar_curr}")
                 pass
 
     return birthdays
