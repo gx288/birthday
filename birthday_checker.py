@@ -152,10 +152,9 @@ def check_birthdays(target_date, is_tomorrow=False):
                     lunar_parts = lunar_date.strip().split('/')
                     lunar_day_month = f"{lunar_parts[0]}/{lunar_parts[1]}" if len(lunar_parts) >= 2 else 'Unknown'
                     message = (
-                        f"Tiêu đề: Sinh nhật {name}\n"
-                        f"{'Ngày mai' if is_tomorrow else 'Hôm nay'}: có sinh nhật của:\n"
-                        f"**{name}**\n"
-                        f"Theo ngày âm: ({lunar_date} - {lunar_day_month}/{target_date.year - 1})"
+                        f"{'Ngày mai ' if is_tomorrow else 'Hôm nay '}"
+                        f"sinh nhật {name} "                        
+                        f"theo ngày âm:\n({lunar_date} - {lunar_day_month}/{target_date.year - 1})"
                     )
                     birthdays.append((message, name))
                     print(f"Found lunar birthday for {name}: {lunar_date} -> {lunar_solar_prev}")
@@ -170,10 +169,9 @@ def check_birthdays(target_date, is_tomorrow=False):
                     lunar_parts = lunar_date.strip().split('/')
                     lunar_day_month = f"{lunar_parts[0]}/{lunar_parts[1]}" if len(lunar_parts) >= 2 else 'Unknown'
                     message = (
-                        f"Tiêu đề: Sinh nhật {name}\n"
-                        f"{'Ngày mai' if is_tomorrow else 'Hôm nay'}: {target_date.strftime('%d/%m/%Y')} có sinh nhật của:\n"
-                        f"**{name}**\n"
-                        f"Theo ngày âm: ({lunar_date} - {lunar_day_month}/{target_date.year})"
+                        f"{'Ngày mai ' if is_tomorrow else 'Hôm nay '}"
+                        f"sinh nhật {name} "                        
+                        f"theo ngày âm:\n({lunar_date} - {lunar_day_month}/{target_date.year - 1})"
                     )
                     birthdays.append((message, name))
                     print(f"Found lunar birthday for {name}: {lunar_date} -> {lunar_solar_curr}")
