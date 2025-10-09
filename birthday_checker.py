@@ -10,7 +10,7 @@ from lunarcalendar import Converter, Solar, Lunar
 
 # Cấu hình
 SHEET_ID = '1nWnCXcKhFh1uRgkcs_qEQCGbZkTdyxL_WD8laSi6kok'
-RANGE_NAME = 'Sheet1!A:C'  # Cột A:C (Họ tên, Dương lịch, Âm lịch)
+RANGE_NAME = 'Trang tính1!A:C'  # Cột A:C (Họ tên, Dương lịch, Âm lịch)
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
