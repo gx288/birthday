@@ -202,14 +202,13 @@ async def main():
     # Thêm body
     if today_birthdays or tomorrow_birthdays:
         if message_parts:
-            message_parts.append("")  # Dòng trống giữa header và body
         for message, _ in today_birthdays:
             message_parts.append(message)
         for message, _ in tomorrow_birthdays:
             message_parts.append(message)
 
         # Gộp thành một tin nhắn
-        message = "\n\n".join(message_parts)
+        message = "\n".join(message_parts)
         await send_telegram_message(message)
     else:
         print("Không có sinh nhật hôm nay hoặc ngày mai.")
