@@ -1,8 +1,8 @@
 name: Check Birthdays
 on:
   schedule:
-    - cron: '0 10 * * *' 
-    - cron: '0 22 * * *'
+    - cron: '0 1 * * *'  # 8:00 AM giờ Việt Nam (1:00 AM UTC)
+    - cron: '0 13 * * *' # 8:00 PM giờ Việt Nam (1:00 PM UTC)
   workflow_dispatch:
 
 jobs:
@@ -13,12 +13,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: '3.12'  # Sử dụng Python 3.12
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Run -u birthday script
+      - name: Run birthday script
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
