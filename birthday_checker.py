@@ -134,9 +134,8 @@ def check_birthdays(target_date, is_tomorrow=False):
                 solar_month_day = datetime.strptime(solar_date.strip(), '%d/%m/%Y').strftime('%m/%d')
                 if solar_month_day == target_month_day:
                     message = (
-                        f"Sinh nhật {name}\n"
-                        f"{'Ngày mai' if is_tomorrow else 'Hôm nay'}: có sinh nhật của:\n"
-                        f"**{name}**\n"
+                        f"{'Ngày mai ' if is_tomorrow else 'Hôm nay '}"
+                        f"sinh nhật {name} "                        
                         f"Theo ngày dương: {solar_date}"
                     )
                     birthdays.append((message, name))
