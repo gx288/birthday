@@ -10,7 +10,8 @@ from lunarcalendar import Converter, Solar, Lunar
 
 # Cấu hình
 SHEET_ID = '1nWnCXcKhFh1uRgkcs_qEQCGbZkTdyxL_WD8laSi6kok'
-RANGE_NAME = 'Trang tính1!A:D'  # Cột A:D (Họ tên, Dương lịch, Âm lịch, Dương lịch từ âm lịch)
+SHEET_NAME = 'Trang tính1'  # Tên sheet chính xác
+RANGE_NAME = f'{SHEET_NAME}!A:D'  # Cột A:D (Họ tên, Dương lịch, Âm lịch, Dương lịch từ âm lịch)
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
@@ -25,7 +26,7 @@ def get_sheet_data():
     return result.get('values', [])
 
 # Ghi dữ liệu vào Google Sheet
-def update_sheet_data(values, range_name):
+def update_sheet_data(values):
     creds_json = os.getenv('GOOGLE_CREDENTIALS')
     creds_dict = json.loads(creds_json)
     creds = Credentials.from_service_account_info(creds_dict)
@@ -34,7 +35,7 @@ def update_sheet_data(values, range_name):
     body = {'values': values}
     sheet.values().update(
         spreadsheetId=SHEET_ID,
-        range=range_name,
+        range=RANGE_NAME,
         valueInputOption='RAW',
         body=body
     ).execute()
@@ -44,13 +45,16 @@ async def send_telegram_message(message):
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode=ParseMode.MARKDOWN)
 
-# Chuyển đổi ngày âm lịch sang dương lịch cho năm cụ thể
+# Chuyển đổi ngày âm lịch sang dương lịch
 def convert_lunar_to_solar(lunar_day, lunar_month, lunar_year, target_year):
     try:
         lunar = Lunar(lunar_year, lunar_month, lunar_day, isleap=False)
         solar = Converter.Lunar2Solar(lunar)
-        solar_target_year = Solar(target_year, solar.month, solar.day)
-        return solar_target_year
+        # Chuyển Solar thành datetime
+        solar_datetime = datetime(solar.year, solar.month, solar.day)
+        # Thay năm bằng target_year
+        solar_datetime = solar_datetime.replace(year=target_year)
+        return solar_datetime
     except ValueError:
         return None
 
@@ -70,18 +74,15 @@ def update_lunar_solar_dates():
                 lunar_year = int(lunar_parts[2])
                 solar_from_lunar = convert_lunar_to_solar(lunar_day, lunar_month, lunar_year, current_year)
                 if solar_from_lunar:
-                    # Định dạng dd/mm/yyyy
                     solar_date_str = solar_from_lunar.strftime('%d/%m/%Y')
-                    # Cập nhật cột D
-                    while len(updated_data[i]) < 4:  # Đảm bảo đủ cột
+                    while len(updated_data[i]) < 4:
                         updated_data[i].append('')
                     updated_data[i][3] = solar_date_str
             except (ValueError, IndexError):
                 pass
 
-    # Ghi lại toàn bộ dữ liệu vào sheet
-    if updated_data != data:  # Chỉ ghi nếu có thay đổi
-        update_sheet_data(updated_data, 'Trang tính1!A:D')
+    if updated_data != data:
+        update_sheet_data(updated_data)
 
 # Kiểm tra sinh nhật
 def check_birthdays(target_date, is_tomorrow=False):
@@ -114,7 +115,6 @@ def check_birthdays(target_date, is_tomorrow=False):
 
 # Hàm chính
 async def main():
-    # Cập nhật cột Dương lịch từ âm lịch
     update_lunar_solar_dates()
 
     today = datetime.now()
