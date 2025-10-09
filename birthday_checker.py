@@ -134,8 +134,8 @@ def check_birthdays(target_date, is_tomorrow=False):
                 solar_month_day = datetime.strptime(solar_date.strip(), '%d/%m/%Y').strftime('%m/%d')
                 if solar_month_day == target_month_day:
                     message = (
-                        f"Tiêu đề: Sinh nhật {name}\n"
-                        f"{'Ngày mai' if is_tomorrow else 'Hôm nay'}: {target_date.strftime('%d/%m/%Y')} có sinh nhật của:\n"
+                        f"Sinh nhật {name}\n"
+                        f"{'Ngày mai' if is_tomorrow else 'Hôm nay'}: có sinh nhật của:\n"
                         f"**{name}**\n"
                         f"Theo ngày dương: {solar_date}"
                     )
@@ -153,7 +153,7 @@ def check_birthdays(target_date, is_tomorrow=False):
                     lunar_day_month = f"{lunar_parts[0]}/{lunar_parts[1]}" if len(lunar_parts) >= 2 else 'Unknown'
                     message = (
                         f"Tiêu đề: Sinh nhật {name}\n"
-                        f"{'Ngày mai' if is_tomorrow else 'Hôm nay'}: {target_date.strftime('%d/%m/%Y')} có sinh nhật của:\n"
+                        f"{'Ngày mai' if is_tomorrow else 'Hôm nay'}: có sinh nhật của:\n"
                         f"**{name}**\n"
                         f"Theo ngày âm: ({lunar_date} - {lunar_day_month}/{target_date.year - 1})"
                     )
@@ -197,10 +197,10 @@ async def main():
     message_parts = []
     if today_birthdays:
         today_names = [name for _, name in today_birthdays]
-        message_parts.append(f"Hôm nay là sinh nhật của {', '.join(today_names)}")
+        message_parts.append(f"{', '.join(today_names)} sinh nhật hôm nay:")
     if tomorrow_birthdays:
         tomorrow_names = [name for _, name in tomorrow_birthdays]
-        message_parts.append(f"Ngày mai là sinh nhật của {', '.join(tomorrow_names)}")
+        message_parts.append(f"{', '.join(tomorrow_names)} sinh nhật ngày mai:")
 
     # Thêm body
     if today_birthdays or tomorrow_birthdays:
