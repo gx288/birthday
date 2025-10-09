@@ -84,7 +84,6 @@ def update_lunar_solar_dates():
     data = get_sheet_data()
     updated_data = data.copy()
     updated = False
-
     for i, row in enumerate(data[1:], start=1):  # Bỏ hàng tiêu đề
         lunar_date = row[2] if len(row) > 2 else ''
         if lunar_date:
@@ -110,7 +109,6 @@ def update_lunar_solar_dates():
             except (ValueError, IndexError) as e:
                 print(f"Error processing lunar date for row {i+1}: {e}")
                 continue
-
     if updated:
         update_sheet_data(updated_data)
     else:
@@ -121,21 +119,19 @@ def check_birthdays(target_date, is_tomorrow=False):
     target_month_day = target_date.strftime('%m/%d')
     data = get_sheet_data()
     birthdays = []
-
     for i, row in enumerate(data[1:], start=1):
         name = row[0]
         solar_date = row[1] if len(row) > 1 else ''
         lunar_solar_prev = row[3] if len(row) > 3 else ''
         lunar_solar_curr = row[4] if len(row) > 4 else ''
         lunar_date = row[2] if len(row) > 2 else ''
-
         if solar_date:
             try:
                 solar_month_day = datetime.strptime(solar_date.strip(), '%d/%m/%Y').strftime('%m/%d')
                 if solar_month_day == target_month_day:
                     message = (
                         f"{'Ngày mai ' if is_tomorrow else 'Hôm nay '}"
-                        f"sinh nhật {name} "                        
+                        f"sinh nhật {name} "
                         f"Theo ngày dương: {solar_date}"
                     )
                     birthdays.append((message, name))
@@ -143,7 +139,6 @@ def check_birthdays(target_date, is_tomorrow=False):
             except ValueError:
                 print(f"Invalid solar date format for row {i+1}: {solar_date}")
                 pass
-
         if lunar_solar_prev and lunar_date:
             try:
                 lunar_solar_month_day = datetime.strptime(lunar_solar_prev.strip(), '%d/%m/%Y').strftime('%m/%d')
@@ -152,7 +147,7 @@ def check_birthdays(target_date, is_tomorrow=False):
                     lunar_day_month = f"{lunar_parts[0]}/{lunar_parts[1]}" if len(lunar_parts) >= 2 else 'Unknown'
                     message = (
                         f"{'Ngày mai ' if is_tomorrow else 'Hôm nay '}"
-                        f"sinh nhật {name} "                        
+                        f"sinh nhật {name} "
                         f"theo ngày âm:\n({lunar_date} - {lunar_day_month}/{target_date.year - 1})"
                     )
                     birthdays.append((message, name))
@@ -160,7 +155,6 @@ def check_birthdays(target_date, is_tomorrow=False):
             except ValueError:
                 print(f"Invalid lunar solar date (prev year) for row {i+1}: {lunar_solar_prev}")
                 pass
-
         if lunar_solar_curr and lunar_date:
             try:
                 lunar_solar_month_day = datetime.strptime(lunar_solar_curr.strip(), '%d/%m/%Y').strftime('%m/%d')
@@ -169,39 +163,38 @@ def check_birthdays(target_date, is_tomorrow=False):
                     lunar_day_month = f"{lunar_parts[0]}/{lunar_parts[1]}" if len(lunar_parts) >= 2 else 'Unknown'
                     message = (
                         f"{'Ngày mai ' if is_tomorrow else 'Hôm nay '}"
-                        f"sinh nhật {name} "                        
-                        f"theo ngày âm:\n({lunar_date} - {lunar_day_month}/{target_date.year - 1})"
+                        f"sinh nhật {name} "
+                        f"theo ngày âm:\n({lunar_date} - {lunar_day_month}/{target_date.year})"
                     )
                     birthdays.append((message, name))
                     print(f"Found lunar birthday for {name}: {lunar_date} -> {lunar_solar_curr}")
             except ValueError:
                 print(f"Invalid lunar solar date (curr year) for row {i+1}: {lunar_solar_curr}")
                 pass
-
     return birthdays
 
 # Hàm chính
 async def main():
     update_lunar_solar_dates()
-
     today = datetime.now()
     tomorrow = today + timedelta(days=1)
     
     today_birthdays = check_birthdays(today)
     tomorrow_birthdays = check_birthdays(tomorrow, is_tomorrow=True)
 
-    # Tạo header
+    # Tạo header với định dạng in đậm
     message_parts = []
     if today_birthdays:
         today_names = [name for _, name in today_birthdays]
-        message_parts.append(f"{', '.join(today_names)} sinh nhật hôm nay:")
+        message_parts.append(f"**{', '.join(today_names)} sinh nhật hôm nay:**")
     if tomorrow_birthdays:
         tomorrow_names = [name for _, name in tomorrow_birthdays]
-        message_parts.append(f"{', '.join(tomorrow_names)} sinh nhật ngày mai:")
+        message_parts.append(f"**{', '.join(tomorrow_names)} sinh nhật ngày mai:**")
 
     # Thêm body
     if today_birthdays or tomorrow_birthdays:
         if message_parts:
+            message_parts.append("")  # Dòng trống giữa header và body
         for message, _ in today_birthdays:
             message_parts.append(message)
         for message, _ in tomorrow_birthdays:
