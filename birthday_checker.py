@@ -132,8 +132,7 @@ def check_birthdays(target_date, is_tomorrow=False):
                 solar_month_day = datetime.strptime(solar_date.strip(), '%d/%m/%Y').strftime('%m/%d')
                 if solar_month_day == target_month_day:
                     message = (
-                        f"{'Ngày mai ' if is_tomorrow else 'Hôm nay '}"
-                        f"sinh nhật {name} "
+                        f"**{name} sinh nhật {'ngày mai' if is_tomorrow else 'hôm nay'}:**\n"
                         f"Theo ngày dương: {solar_date}"
                     )
                     birthdays.append((message, name))
@@ -148,9 +147,8 @@ def check_birthdays(target_date, is_tomorrow=False):
                     lunar_parts = lunar_date.strip().split('/')
                     lunar_day_month = f"{lunar_parts[0]}/{lunar_parts[1]}" if len(lunar_parts) >= 2 else 'Unknown'
                     message = (
-                        f"{'Ngày mai ' if is_tomorrow else 'Hôm nay '}"
-                        f"sinh nhật {name} "
-                        f"theo ngày âm:\n({lunar_date} - {lunar_day_month}/{target_date.year - 1})"
+                        f"**{name} sinh nhật {'ngày mai' if is_tomorrow else 'hôm nay'}:**\n"
+                        f"Theo ngày âm: ({lunar_date} - {lunar_day_month}/{target_date.year - 1})"
                     )
                     birthdays.append((message, name))
                     print(f"Found lunar birthday for {name}: {lunar_date} -> {lunar_solar_prev}")
@@ -164,9 +162,8 @@ def check_birthdays(target_date, is_tomorrow=False):
                     lunar_parts = lunar_date.strip().split('/')
                     lunar_day_month = f"{lunar_parts[0]}/{lunar_parts[1]}" if len(lunar_parts) >= 2 else 'Unknown'
                     message = (
-                        f"{'Ngày mai ' if is_tomorrow else 'Hôm nay '}"
-                        f"sinh nhật {name} "
-                        f"theo ngày âm:\n({lunar_date} - {lunar_day_month}/{target_date.year})"
+                        f"**{name} sinh nhật {'ngày mai' if is_tomorrow else 'hôm nay'}:**\n"
+                        f"Theo ngày âm: ({lunar_date} - {lunar_day_month}/{target_date.year})"
                     )
                     birthdays.append((message, name))
                     print(f"Found lunar birthday for {name}: {lunar_date} -> {lunar_solar_curr}")
@@ -184,28 +181,13 @@ async def main():
     today_birthdays = check_birthdays(today)
     tomorrow_birthdays = check_birthdays(tomorrow, is_tomorrow=True)
 
-    # Tạo header với định dạng in đậm
-    message_parts = []
-    if today_birthdays:
-        today_names = [name for _, name in today_birthdays]
-        message_parts.append(f"**{', '.join(today_names)} sinh nhật hôm nay:**")
-    if tomorrow_birthdays:
-        tomorrow_names = [name for _, name in tomorrow_birthdays]
-        message_parts.append(f"**{', '.join(tomorrow_names)} sinh nhật ngày mai:**")
-
-    # Thêm body
-    if today_birthdays or tomorrow_birthdays:
-        if message_parts:
-            message_parts.append("")  # Dòng trống giữa header và body
-        for message, _ in today_birthdays:
-            message_parts.append(message)
-        for message, _ in tomorrow_birthdays:
-            message_parts.append(message)
-
-        # Gộp thành một tin nhắn
-        message = "\n".join(message_parts)
+    # Gửi tin nhắn riêng cho mỗi người
+    for message, _ in today_birthdays:
         await send_telegram_message(message)
-    else:
+    for message, _ in tomorrow_birthdays:
+        await send_telegram_message(message)
+
+    if not today_birthdays and not tomorrow_birthdays:
         print("Không có sinh nhật hôm nay hoặc ngày mai.")
 
 if __name__ == '__main__':
