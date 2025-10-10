@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import json
 import asyncio
 from lunarcalendar import Converter, Solar, Lunar
+import pytz
 
 # Cấu hình
 SHEET_ID = '1nWnCXcKhFh1uRgkcs_qEQCGbZkTdyxL_WD8laSi6kok'
@@ -15,6 +16,7 @@ SHEET_NAME = 'Trang tính1'
 RANGE_NAME = f'{SHEET_NAME}!A:E'
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+VN_TIMEZONE = pytz.timezone('Asia/Ho_Chi_Minh')
 
 # Đọc Google Sheet
 def get_sheet_data():
@@ -79,7 +81,7 @@ def convert_lunar_to_solar(lunar_day, lunar_month, target_year):
 
 # Cập nhật cột D (năm trước) và E (năm hiện tại)
 def update_lunar_solar_dates():
-    current_year = datetime.now().year
+    current_year = datetime.now(VN_TIMEZONE).year
     previous_year = current_year - 1
     data = get_sheet_data()
     updated_data = data.copy()
@@ -176,7 +178,7 @@ def check_birthdays(target_date, is_tomorrow=False):
 # Hàm chính
 async def main():
     update_lunar_solar_dates()
-    today = datetime.now()
+    today = datetime.now(VN_TIMEZONE)
     tomorrow = today + timedelta(days=1)
     
     today_birthdays = check_birthdays(today)
