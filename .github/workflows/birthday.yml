@@ -1,26 +1,61 @@
 name: Check Birthdays
 on:
   schedule:
-    - cron: '0 12 * * *'  # 8:00 AM giờ Việt Nam (1:00 AM UTC)
-    - cron: '0 22 * * *' # 8:00 PM giờ Việt Nam (1:00 PM UTC)
+    - cron: '0 1 * * *'   # 8:00 AM giờ Việt Nam (1:00 AM UTC)
+    - cron: '0 13 * * *'  # 8:00 PM giờ Việt Nam (1:00 PM UTC)
   workflow_dispatch:
 
 jobs:
   check-birthdays:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12'  # Sử dụng Python 3.12
+          python-version: '3.12'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Run -u birthday script
+
+      - name: Run birthday checker script
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python birthday_checker.py
+
+      # ------------------- Bước cập nhật thời gian check -------------------
+      - name: Update last_check.txt and keep only latest 1000 lines
+        run: |
+          # Tạo thư mục nếu chưa có
+          mkdir -p .github/logs
+
+          # Đường dẫn file log
+          LOG_FILE=".github/logs/last_check.txt"
+
+          # Thời gian hiện tại theo giờ Việt Nam (UTC+7)
+          CURRENT_TIME=$(TZ='Asia/Ho_Chi_Minh' date '+%Y-%m-%d %H:%M:%S %Z')
+
+          # Ghi thêm dòng mới vào đầu file (hoặc tạo file nếu chưa tồn tại)
+          echo "$CURRENT_TIME - Workflow ran successfully (run_id: ${{ github.run_id }})" | cat - $LOG_FILE > temp && mv temp $LOG_FILE || echo "$CURRENT_TIME - Workflow ran successfully (first run)" > $LOG_FILE
+
+          # Giữ lại tối đa 1000 dòng mới nhất (xóa dòng cũ thừa)
+          tail -n 1000 $LOG_FILE > temp && mv temp $LOG_FILE
+
+      # Commit và push thay đổi về repo
+      - name: Commit & Push last_check.txt update
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/logs/last_check.txt
+          git commit -m "Update last check time [skip ci]" || echo "Nothing to commit"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
