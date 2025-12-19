@@ -1,4 +1,5 @@
 name: Check Birthdays
+
 on:
   schedule:
     - cron: '0 1 * * *'   # 8:00 AM giờ Việt Nam (1:00 AM UTC)
@@ -29,27 +30,18 @@ jobs:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID_SPECIAL: ${{ secrets.TELEGRAM_CHAT_ID_SPECIAL }}  # Secret mới
         run: python birthday_checker.py
 
       # ------------------- Bước cập nhật thời gian check -------------------
       - name: Update last_check.txt and keep only latest 1000 lines
         run: |
-          # Tạo thư mục nếu chưa có
           mkdir -p .github/logs
-
-          # Đường dẫn file log
           LOG_FILE=".github/logs/last_check.txt"
-
-          # Thời gian hiện tại theo giờ Việt Nam (UTC+7)
           CURRENT_TIME=$(TZ='Asia/Ho_Chi_Minh' date '+%Y-%m-%d %H:%M:%S %Z')
-
-          # Ghi thêm dòng mới vào đầu file (hoặc tạo file nếu chưa tồn tại)
           echo "$CURRENT_TIME - Workflow ran successfully (run_id: ${{ github.run_id }})" | cat - $LOG_FILE > temp && mv temp $LOG_FILE || echo "$CURRENT_TIME - Workflow ran successfully (first run)" > $LOG_FILE
-
-          # Giữ lại tối đa 1000 dòng mới nhất (xóa dòng cũ thừa)
           tail -n 1000 $LOG_FILE > temp && mv temp $LOG_FILE
 
-      # Commit và push thay đổi về repo
       - name: Commit & Push last_check.txt update
         run: |
           git config --global user.name "github-actions[bot]"
