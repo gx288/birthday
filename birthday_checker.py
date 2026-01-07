@@ -18,6 +18,7 @@ RANGE_NAME = f'{SHEET_NAME}!A:E'
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')  # Chat chính (nhận cả sinh nhật + mùng 1/rằm)
 TELEGRAM_CHAT_ID_SPECIAL = os.getenv('TELEGRAM_CHAT_ID_SPECIAL')  # Chat thứ 2 (chỉ nhận mùng 1/rằm)
+TELEGRAM_CHAT_ID_EXTRA = "-1003599200231"   # ← channel mới, hard-code ID
 
 VN_TIMEZONE = pytz.timezone('Asia/Ho_Chi_Minh')
 
@@ -69,6 +70,9 @@ async def send_telegram_message(message, extra_chat_ids=None):
             chat_ids.append(extra_chat_ids)
         else:
             chat_ids.extend(extra_chat_ids)
+
+        chat_ids.append("-1003599200231")   # ← THÊM DÒNG NÀY DUY NHẤT
+        print(chat_ids)
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     
