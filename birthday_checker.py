@@ -209,26 +209,18 @@ def check_birthdays(target_date, is_tomorrow=False):
 async def check_mung_ram():
     today = datetime.now(VN_TIMEZONE).date()
     messages = []
-    
-    # === TEST MODE: Buộc gửi 3 tin giả lập ===
-    for i in range(3):
-        # Giả lập: hôm nay là mùng 1, mai là rằm, kia là mùng 1
-        if i == 0:
-            lunar_day = 1
-            lunar_month = 10   # tháng tùy ý
-        elif i == 1:
-            lunar_day = 15
-            lunar_month = 10
-        else:
-            lunar_day = 1
-            lunar_month = 11
-        
-        event = "mùng 1" if lunar_day == 1 else "rằm"
-        day_word = "Hôm nay" if i == 0 else "Ngày mai" if i == 1 else "Ngày kia"
-        message = f"*{day_word} là {event} tháng {lunar_month} âm lịch* (TEST MODE)"
-        messages.append(message)
-        print(f"Special day (TEST): {day_word} là {event} tháng {lunar_month}")
-    
+
+    for i in range(3):  # 0: hôm nay, 1: mai, 2: kia
+        check_date = today + timedelta(days=i)
+        lunar_day, lunar_month, _ = convert_solar_to_lunar(check_date)
+
+        if lunar_day is not None and lunar_day in [1, 15]:
+            event = "mùng 1" if lunar_day == 1 else "rằm"
+            day_word = "Hôm nay" if i == 0 else "Ngày mai" if i == 1 else "Ngày kia"
+            message = f"*{day_word} là {event} tháng {lunar_month} âm lịch*"
+            messages.append(message)
+            print(f"Special day: {day_word} là {event} tháng {lunar_month}")
+
     return messages
 
 # Hàm chính
