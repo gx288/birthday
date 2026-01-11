@@ -1,0 +1,30 @@
+name: Scrape Cho Tot
+
+on:
+  schedule:
+    - cron: '0 */3 * * *' # Chạy mỗi 3 giờ
+  workflow_dispatch: # Cho phép chạy thủ công nút Run
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install Dependencies
+      run: |
+        pip install selenium gspread oauth2client requests
+
+    - name: Run Scraper
+      env:
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: python scrape_chotot.py
