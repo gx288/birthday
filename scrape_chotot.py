@@ -17,6 +17,11 @@ START_URL = "https://www.chotot.com/mua-ban-nhac-cu-ha-noi?price=0-2100000&f=p&l
 SHEET_ID = "14tqKftTqlesnb0NqJZU-_f1EsWWywYqO36NiuDdmaTo"
 SHEET_NAME = "Chợ tốt"
 
+def log(message):
+    """Hàm in log có thời gian để dễ theo dõi"""
+    now = datetime.now().strftime("%H:%M:%S")
+    print(f"[{now}] {message}")
+
 def get_telegram_config():
     return {
         "token": os.environ.get("TELEGRAM_BOT_TOKEN"),
@@ -24,17 +29,19 @@ def get_telegram_config():
     }
 
 def setup_driver():
+    log("🌐 Đang khởi tạo trình duyệt Chrome (Headless)...")
     chrome_options = Options()
-    chrome_options.add_argument("--headless")  # Chạy ngầm
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
-    # Fake User-Agent để tránh bị chặn
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36")
     driver = webdriver.Chrome(options=chrome_options)
+    log("✅ Khởi tạo trình duyệt thành công.")
     return driver
 
 def connect_google_sheet():
+    log("📂 Đang kết nối Google Sheets...")
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_json = json.loads(os.environ.get("GOOGLE_CREDENTIALS"))
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
@@ -43,19 +50,23 @@ def connect_google_sheet():
     sh = client.open_by_key(SHEET_ID)
     try:
         worksheet = sh.worksheet(SHEET_NAME)
+        log(f"✅ Đã tìm thấy sheet '{SHEET_NAME}'.")
     except gspread.WorksheetNotFound:
-        # Tạo sheet mới nếu chưa có
+        log(f"⚠️ Chưa có sheet '{SHEET_NAME}', đang tạo mới...")
         worksheet = sh.add_worksheet(title=SHEET_NAME, rows="1000", cols="6")
         worksheet.append_row(["Title", "Price", "Link", "Time Posted", "Location", "Scraped At"])
+        log("✅ Đã tạo sheet mới thành công.")
     
     return worksheet
 
 def send_telegram_alert(item):
     cfg = get_telegram_config()
     if not cfg["token"] or not cfg["chat_id"]:
+        log("❌ Thiếu cấu hình Telegram (Token/ChatID). Bỏ qua gửi tin.")
         return
 
-    # Format tin nhắn HTML
+    log(f"📲 Đang gửi tin Telegram: {item['title']}...")
+    
     message = (
         f"🎸 <b>HÀNG MỚI TRÊN CHỢ TỐT!</b>\n\n"
         f"🏷 <b>Tên:</b> {item['title']}\n"
@@ -73,17 +84,30 @@ def send_telegram_alert(item):
         "disable_web_page_preview": False
     }
     try:
-        requests.post(url, json=payload)
-        time.sleep(1) # Tránh spam
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            log("   -> Gửi thành công.")
+        else:
+            log(f"   -> Gửi thất bại: {response.text}")
+        time.sleep(1) 
     except Exception as e:
-        print(f"Lỗi gửi Telegram: {e}")
+        log(f"   -> Lỗi khi gửi Telegram: {e}")
 
 def scrape_data():
-    driver = setup_driver()
-    worksheet = connect_google_sheet()
+    log("🚀 BẮT ĐẦU QUÁ TRÌNH SCRAPE...")
     
-    # Lấy danh sách link đã tồn tại để tránh trùng lặp
-    existing_links = set(worksheet.col_values(3)[1:]) # Cột 3 là Link, bỏ header
+    # 1. Kết nối Sheet trước để lấy dữ liệu cũ
+    worksheet = connect_google_sheet()
+    try:
+        existing_links = worksheet.col_values(3)[1:] # Cột 3 là Link, bỏ header
+        existing_items_check = set(existing_links)
+        log(f"ℹ️ Đã có {len(existing_items_check)} sản phẩm trong kho dữ liệu cũ.")
+    except Exception as e:
+        log(f"⚠️ Lỗi khi đọc dữ liệu cũ (có thể sheet rỗng): {e}")
+        existing_items_check = set()
+
+    # 2. Khởi động trình duyệt
+    driver = setup_driver()
     
     new_items = []
     page = 1
@@ -91,58 +115,60 @@ def scrape_data():
 
     while has_items:
         current_url = f"{START_URL}&page={page}" if page > 1 else START_URL
-        print(f"Dang cào trang: {page} - {current_url}")
+        log(f"\n--- ĐANG XỬ LÝ TRANG {page} ---")
+        log(f"🔗 URL: {current_url}")
+        
         driver.get(current_url)
         
         try:
-            # Đợi list items load. Dựa vào class 'a14axl8t' trong HTML bạn cung cấp
+            # Đợi load
             WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "li.a14axl8t"))
             )
             
-            # Lấy tất cả các thẻ li là item
             items = driver.find_elements(By.CSS_SELECTOR, "li.a14axl8t")
-            
             if not items:
-                print("Không tìm thấy items nào nữa.")
+                log("🛑 Không tìm thấy thẻ <li> nào. Có thể đã hết hàng.")
                 has_items = False
                 break
+            
+            log(f"🔎 Tìm thấy {len(items)} items trên trang này.")
 
             items_found_on_page = 0
+            duplicates_on_page = 0
             
-            for item in items:
+            for index, item in enumerate(items):
                 try:
-                    # Link
                     link_el = item.find_element(By.TAG_NAME, "a")
                     link = link_el.get_attribute("href")
                     if not link.startswith("http"):
                         link = BASE_URL + link
                     
-                    # Nếu link đã có trong sheet thì bỏ qua (cũ)
-                    if link in existing_items_check: # Dùng set check cho nhanh
+                    # Log ngắn gọn để biết đang chạy
+                    # print(f"   Check item {index+1}: {link[-20:]}...", end="\r")
+
+                    if link in existing_items_check:
+                        duplicates_on_page += 1
                         continue
                         
-                    existing_items_check.add(link) # Add vào để loop sau ko trùng
+                    existing_items_check.add(link)
                     
-                    # Title (trong h3)
+                    # Lấy thông tin chi tiết
                     try:
                         title = item.find_element(By.CSS_SELECTOR, "h3").text
                     except:
                         title = link_el.get_attribute("title") or "No Title"
 
-                    # Price
                     try:
-                        price = item.find_element(By.CSS_SELECTOR, "span.bfe6oav").text # Class chứa giá
+                        price = item.find_element(By.CSS_SELECTOR, "span.bfe6oav").text
                     except:
                         price = "Thỏa thuận"
                         
-                    # Time
                     try:
                         time_posted = item.find_element(By.CSS_SELECTOR, "span.c1u6gyxh.tx5yyjc").text
                     except:
                         time_posted = "N/A"
 
-                    # Location
                     try:
                         loc = item.find_element(By.CSS_SELECTOR, "span.c1u6gyxh:not(.tx5yyjc)").text
                     except:
@@ -159,36 +185,40 @@ def scrape_data():
                     
                     new_items.append(item_data)
                     items_found_on_page += 1
+                    log(f"   ✅ Phát hiện món mới: {title} - {price}")
 
                 except Exception as e:
-                    print(f"Lỗi parse 1 item: {e}")
+                    log(f"   ⚠️ Lỗi parse item {index}: {e}")
                     continue
             
-            if items_found_on_page == 0 and page > 1:
-                # Nếu trang này ko có item mới nào (toàn trùng), có thể dừng sớm
-                # Nhưng để chắc chắn, ta chỉ dừng khi không tìm thấy element li
-                pass
+            log(f"📊 Tổng kết trang {page}: {items_found_on_page} món mới | {duplicates_on_page} món trùng.")
+
+            # Logic dừng thông minh: Nếu trang này toàn món trùng (không có món mới nào)
+            # thì khả năng cao các trang sau cũng toàn đồ cũ -> DỪNG
+            if items_found_on_page == 0 and duplicates_on_page > 0:
+                log("🛑 Trang này toàn bộ là hàng cũ. Dừng cào để tiết kiệm thời gian.")
+                has_items = False
+                break
 
             page += 1
-            time.sleep(2) # Nghỉ nhẹ
+            time.sleep(2)
 
         except Exception as e:
-            print(f"Dừng lại tại trang {page}. Lý do: Không thấy list hàng hoặc hết trang. ({e})")
+            log(f"🛑 Lỗi hoặc hết trang tại page {page}. ({e})")
             has_items = False
 
     driver.quit()
+    log("\n--- KẾT THÚC CÀO DỮ LIỆU ---")
     
-    # Xử lý dữ liệu mới
     if new_items:
-        print(f"Tìm thấy {len(new_items)} món mới.")
-        # Đảo ngược để món cũ nhất trong đám mới lên trước (giữ thứ tự thời gian)
+        log(f"🎉 Tổng cộng tìm thấy {len(new_items)} món hàng mới.")
+        
+        # Đảo ngược để lưu món cũ nhất lên trước
         new_items.reverse()
         
         rows_to_add = []
         for item in new_items:
-            # Gửi Tele
             send_telegram_alert(item)
-            # Chuẩn bị data ghi sheet
             rows_to_add.append([
                 item["title"],
                 item["price"],
@@ -198,20 +228,17 @@ def scrape_data():
                 item["scraped_at"]
             ])
         
-        # Ghi vào sheet (batch update cho nhanh)
-        worksheet.append_rows(rows_to_add)
+        log("💾 Đang lưu vào Google Sheets...")
+        try:
+            worksheet.append_rows(rows_to_add)
+            log("✅ Đã lưu xong.")
+        except Exception as e:
+            log(f"❌ Lỗi khi lưu sheet: {e}")
+            
     else:
-        print("Không có món hàng nào mới.")
+        log("💤 Không có món hàng nào mới trong lần chạy này.")
 
-# Biến tạm để check duplicate trong runtime
-existing_items_check = set()
+    log("🏁 Hoàn tất script.")
 
 if __name__ == "__main__":
-    # Load lại existing links từ sheet vào set trước khi chạy
-    try:
-        ws = connect_google_sheet()
-        existing_items_check = set(ws.col_values(3)[1:])
-    except:
-        pass
-        
     scrape_data()
