@@ -2,7 +2,7 @@ name: Scrape Cho Tot
 
 on:
   schedule:
-    - cron: '0 * * * *' # Chạy mỗi 3 giờ
+    - cron: '0 1-13 * * *'
   workflow_dispatch: # Cho phép chạy thủ công nút Run
 
 jobs:
