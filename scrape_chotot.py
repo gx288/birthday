@@ -78,6 +78,13 @@ def connect_google_sheet():
         log("Đảm bảo cột Hidden ở I")
     return worksheet
 
+def is_valid_media_url(url):
+    try:
+        resp = requests.head(url, timeout=6, allow_redirects=True)
+        return resp.status_code == 200
+    except:
+        return False
+
 def get_images_from_detail(link):
     headers = {"User-Agent": random.choice(USER_AGENTS)}
     try:
@@ -181,13 +188,6 @@ def send_telegram_with_media(item, images, videos):
             send_telegram_alert(item)
     else:
         send_telegram_alert(item)
-
-def is_valid_media_url(url):
-    try:
-        resp = requests.head(url, timeout=6, allow_redirects=True)
-        return resp.status_code == 200
-    except:
-        return False
 
 def send_telegram_alert(item):
     cfg = get_telegram_config()
@@ -300,7 +300,7 @@ def scrape_data():
         batch_requests = []
         stt = 0  # STT thứ tự item trên page (1 cho item đầu tiên trên HTML)
         for item_el in items:
-            stt += 1  # tăng STT cho từng item (tin đầu = 1, tin sau = 2,...)
+            stt += 1  # tăng STT cho từng item
             data = extract_item_data(item_el, page)
             if not data:
                 continue
@@ -338,7 +338,7 @@ def scrape_data():
                         all_data,
                         key=lambda row: (
                             int(row[8]) if len(row) > 8 and row[8].isdigit() else 999,  # Hidden/page tăng dần
-                            int(row[9]) if len(row) > 9 and row[9].isdigit() else 999   # STT tăng dần (tin đầu page ở trên)
+                            int(row[9]) if len(row) > 9 and row[9].isdigit() else 999   # STT tăng dần
                         ),
                         reverse=False
                     )
