@@ -327,30 +327,31 @@ def scrape_data():
                 images, videos = get_images_from_detail(link)
                 send_telegram_with_media(data, images, videos)
                 total_new += 1
+
         if new_rows:
             log(f"Thêm {len(new_rows)} tin mới từ trang {page}")
-            # Append
+            # Append với cột Order tạm (cột 10)
             worksheet.append_rows(new_rows)
-            # Sort lại toàn bộ sheet
+
+            # Sort toàn bộ sheet theo (Hidden/page tăng dần, Order tăng dần)
             try:
                 all_data = worksheet.get_all_values()[1:]  # từ dòng 2
                 if all_data:
-                    # Sort: page tăng dần (cột 9 index 8), rồi Order tăng dần (cột 10 index 9)
                     sorted_data = sorted(
                         all_data,
                         key=lambda row: (
-                            int(row[8]) if len(row) > 8 and row[8].isdigit() else 999,
-                            int(row[9]) if len(row) > 9 and row[9].isdigit() else 999
+                            int(row[8]) if len(row) > 8 and row[8].isdigit() else 999,  # Hidden (page) tăng dần
+                            int(row[9]) if len(row) > 9 and row[9].isdigit() else 999   # Order tăng dần
                         ),
                         reverse=False
                     )
                     worksheet.clear()
-                    # Header có thêm cột Order tạm (cột J)
+                    # Header có Order tạm
                     worksheet.append_row(["Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Scraped At", "Hidden", "Order"])
                     worksheet.append_rows(sorted_data)
-                    # Xóa cột Order tạm (cột J)
+                    # Xóa cột Order (cột J = 10)
                     worksheet.delete_columns(10)
-                    log(f"Đã sort sheet theo page tăng dần + thứ tự trong page ({len(sorted_data)} dòng)")
+                    log(f"Đã sort sheet theo page tăng dần + thứ tự xuất hiện trong page ({len(sorted_data)} dòng)")
             except Exception as e:
                 log(f"Lỗi sort sheet: {e}")
         if batch_requests:
