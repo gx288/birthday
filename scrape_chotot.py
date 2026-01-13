@@ -24,19 +24,23 @@ SHEET_NAME = "Chợ tốt"
 MAX_PAGES = 12
 MAX_CONSECUTIVE_EMPTY = 3
 SLEEP_BETWEEN_PAGES = 4.5
+
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
 ]
+
 def log(message):
     now = datetime.now().strftime("%H:%M:%S")
     print(f"[{now}] {message}")
+
 def get_telegram_config():
     return {
         "token": os.environ.get("TELEGRAM_BOT_TOKEN"),
         "chat_id": os.environ.get("TELEGRAM_CHAT_ID")
     }
+
 def setup_driver():
     log("Khởi tạo Chrome headless...")
     options = Options()
@@ -48,6 +52,7 @@ def setup_driver():
     options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
     driver = webdriver.Chrome(options=options)
     return driver
+
 def connect_google_sheet():
     log("Kết nối Google Sheets...")
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -72,6 +77,15 @@ def connect_google_sheet():
         worksheet.update_cell(1, 9, "Hidden")
         log("Đảm bảo cột Hidden ở I")
     return worksheet
+
+def is_valid_media_url(url):
+    """Kiểm tra link ảnh/video tồn tại mà không tải toàn bộ file"""
+    try:
+        resp = requests.head(url, timeout=6, allow_redirects=True)
+        return resp.status_code == 200 and 'content-length' in resp.headers
+    except:
+        return False
+
 def get_images_from_detail(link):
     headers = {"User-Agent": random.choice(USER_AGENTS)}
     try:
@@ -82,7 +96,7 @@ def get_images_from_detail(link):
         soup = BeautifulSoup(resp.text, "html.parser")
         images = []
         videos = []
-        # 1. Ưu tiên JSON-LD (nếu có mảng image chính thức)
+        # 1. JSON-LD
         json_ld_tags = soup.find_all("script", type="application/ld+json")
         for tag in json_ld_tags:
             try:
@@ -94,51 +108,39 @@ def get_images_from_detail(link):
                     if isinstance(img_list, list):
                         for img in img_list:
                             if isinstance(img, str) and "cdn.chotot.com" in img:
-                                # Giữ nguyên link gốc, chỉ thay nếu cần
                                 if "preset:view/plain" in img or "preset:listing" in img:
                                     images.append(img)
             except:
                 pass
-        # 2. Regex trong toàn bộ HTML/script - lọc ảnh sản phẩm thật
+        # 2. Regex lọc ảnh thật
         matches = re.findall(r'(https?://cdn\.chotot\.com/[^"\')\s<]+?\.(jpg|jpeg|png|webp))', resp.text)
         for m in matches:
             url = m[0]
-            # Lọc chặt: chỉ ảnh có ID dài ở cuối (ảnh tin thật), loại ads/logo/avatar
-            if (re.search(r'-\d{15,}\.(jpg|jpeg|png|webp)$', url) and 
-                "avatar" not in url and "logo" not in url and "admincentre" not in url and 
+            if (re.search(r'-\d{15,}\.(jpg|jpeg|png|webp)$', url) and
+                "avatar" not in url and "logo" not in url and "admincentre" not in url and
                 "reward" not in url):
                 if url not in images:
                     images.append(url)
-        # 3. Tìm video (nếu có <video> hoặc thumbnail video)
-        video_tags = soup.find_all("video")
-        for vid in video_tags:
-            src = vid.get("src") or ""
-            if src and "cdn.chotot.com" in src:
-                videos.append(src)
-            sources = vid.find_all("source")
-            for s in sources:
-                src = s.get("src") or ""
-                if src:
-                    videos.append(src)
-        # Nếu có thumbnail video, lấy src thumbnail nhưng đánh dấu là video
+        # 3. Video (thumbnail hoặc source)
         thumb_videos = soup.find_all("img", src=re.compile(r'videodelivery\.net.*thumbnail'))
         for thumb in thumb_videos:
             src = thumb.get("src") or ""
             if src:
-                # Thử thay thumbnail.jpg → video.mp4 (cần test với link thật)
-                videos.append(src.replace("thumbnail.jpg", "video.mp4"))
-        # Giới hạn & unique
-        images = list(dict.fromkeys(images))[:6] # loại duplicate, giữ 6
+                videos.append(src)
+        # Giới hạn
+        images = list(dict.fromkeys(images))[:6]
         videos = list(dict.fromkeys(videos))[:2]
-        log(f"Detail {link}: {len(images)} ảnh thật + {len(videos)} video")
+        log(f"Detail {link}: {len(images)} ảnh + {len(videos)} video (trước lọc tồn tại)")
         return images, videos
     except Exception as e:
         log(f"Lỗi lấy media {link}: {e}")
         return [], []
+
 def send_telegram_with_media(item, images, videos):
     cfg = get_telegram_config()
     if not cfg["token"] or not cfg["chat_id"]:
         return
+
     caption = (
         f"🎸 <b>HÀNG MỚI - CHỢ TỐT</b>\n\n"
         f"<b>{item['title']}</b>\n"
@@ -149,38 +151,52 @@ def send_telegram_with_media(item, images, videos):
         f"⏰ {item['time']}\n\n"
         f"<a href='{item['link']}'>🔗 Xem chi tiết</a>"
     )
+
+    # Lọc chỉ link tồn tại
+    valid_images = [img for img in images if is_valid_media_url(img)]
+    valid_videos = [vid for vid in videos if is_valid_media_url(vid)]
+
+    log(f"Sau lọc tồn tại: {len(valid_images)} ảnh + {len(valid_videos)} video")
+
     media_group = []
-    # Ảnh trước
-    for idx, img_url in enumerate(images):
+    has_media = False
+
+    # Thêm ảnh
+    for idx, img_url in enumerate(valid_images):
         media_group.append({
             "type": "photo",
             "media": img_url,
-            "caption": caption if idx == 0 and not videos else "", # caption ở item đầu nếu có ảnh
+            "caption": caption if idx == 0 and not valid_videos else "",
             "parse_mode": "HTML"
         })
-    # Video sau (Telegram hỗ trợ mix trong sendMediaGroup)
-    for vid_url in videos:
+        has_media = True
+
+    # Thêm video (nếu có)
+    for vid_url in valid_videos:
         media_group.append({
             "type": "video",
             "media": vid_url,
-            "caption": caption if not media_group else "" # nếu không có ảnh
+            "caption": caption if not media_group else ""
         })
+        has_media = True
+
     if media_group:
         url = f"https://api.telegram.org/bot{cfg['token']}/sendMediaGroup"
         payload = {"chat_id": cfg["chat_id"], "media": json.dumps(media_group)}
         try:
-            resp = requests.post(url, data=payload, timeout=25)
+            resp = requests.post(url, data=payload, timeout=30)
             if resp.status_code == 200:
-                log(f"✅ Gửi media group ({len(images)} ảnh + {len(videos)} video) cho tin mới")
+                log(f"✅ Gửi media group thành công ({len(valid_images)} ảnh + {len(valid_videos)} video)")
             else:
-                log(f"Telegram media group lỗi {resp.status_code}: {resp.text[:200]}")
-                # Nếu lỗi (ví dụ video không hỗ trợ), gửi text + ảnh riêng
+                log(f"Media group lỗi {resp.status_code}: {resp.text[:200]} → gửi text thay thế")
                 send_telegram_alert(item)
         except Exception as e:
-            log(f"Lỗi gửi media: {e}")
+            log(f"Lỗi gửi media group: {e} → gửi text thay thế")
             send_telegram_alert(item)
     else:
+        log("Không có media hợp lệ → gửi text")
         send_telegram_alert(item)
+
 def send_telegram_alert(item):
     cfg = get_telegram_config()
     if not cfg["token"] or not cfg["chat_id"]:
@@ -195,17 +211,22 @@ def send_telegram_alert(item):
         f"⏰ {item['time']}\n\n"
         f"<a href='{item['link']}'>🔗 Xem chi tiết</a>"
     )
-    requests.post(
-        f"https://api.telegram.org/bot{cfg['token']}/sendMessage",
-        json={"chat_id": cfg["chat_id"], "text": message, "parse_mode": "HTML"},
-        timeout=10
-    )
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{cfg['token']}/sendMessage",
+            json={"chat_id": cfg["chat_id"], "text": message, "parse_mode": "HTML"},
+            timeout=10
+        )
+    except Exception as e:
+        log(f"Lỗi gửi text Telegram: {e}")
+
 def page_has_no_results(driver):
     try:
         text = driver.find_element(By.TAG_NAME, "body").text.lower()
         return any(x in text for x in ["không có kết quả", "không tìm thấy", "0 tin đăng"])
     except:
         return False
+
 def extract_item_data(item_element, page_num):
     try:
         a = item_element.find_element(By.TAG_NAME, "a")
@@ -242,6 +263,7 @@ def extract_item_data(item_element, page_num):
         }
     except:
         return None
+
 def scrape_data():
     log("🚀 BẮT ĐẦU QUÉT CHỢ TỐT - Nhạc cụ Hà Nội ≤ 2.1tr")
     worksheet = connect_google_sheet()
@@ -262,7 +284,7 @@ def scrape_data():
     consecutive_empty = 0
     while page <= MAX_PAGES:
         url = START_URL if page == 1 else f"{START_URL}&page={page}"
-        log(f" Trang {page} → {url}")
+        log(f"Trang {page} → {url}")
         try:
             driver.get(url)
             WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, "li.a14axl8t")))
@@ -292,11 +314,11 @@ def scrape_data():
             if link in link_to_row:
                 row = link_to_row[link]
                 batch_requests.append({
-                    "range": f"G{row}", # Views - cột G
+                    "range": f"G{row}",  # Views - cột G
                     "values": [[str(data["views"])]]
                 })
                 batch_requests.append({
-                    "range": f"I{row}", # Hidden - cột I
+                    "range": f"I{row}",  # Hidden - cột I
                     "values": [[str(page)]]
                 })
                 total_updated += 1
@@ -311,29 +333,23 @@ def scrape_data():
                 total_new += 1
         if new_rows:
             log(f"Thêm {len(new_rows)} tin mới từ trang {page}")
-            # Append như cũ
+            # Append
             worksheet.append_rows(new_rows)
-            # Sau khi append → sort toàn bộ sheet theo cột Hidden (page) tăng dần
+            # Sort lại toàn bộ sheet theo cột Hidden (page) tăng dần
             try:
-                # Lấy toàn bộ dữ liệu (bỏ header)
-                all_data = worksheet.get_all_values()[1:] # từ dòng 2 trở đi
+                all_data = worksheet.get_all_values()[1:]  # từ dòng 2
                 if all_data:
-                    # Sort theo cột 9 (Hidden, index 8), tăng dần (page nhỏ lên đầu)
                     sorted_data = sorted(
                         all_data,
-                        key=lambda row: int(row[8]) if len(row) > 8 and row[8].isdigit() else 999, # cột Hidden
-                        reverse=False # tăng dần
+                        key=lambda row: (int(row[8]) if len(row) > 8 and row[8].isdigit() else 999, row[7]),  # page tăng dần, rồi Scraped At
+                        reverse=False
                     )
-                    # Xóa dữ liệu cũ (giữ header)
                     worksheet.clear()
-                    # Viết lại header
                     worksheet.append_row(["Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Scraped At", "Hidden"])
-                    # Viết lại dữ liệu đã sort
                     worksheet.append_rows(sorted_data)
-                    log(f"Đã sort sheet theo Hidden (page) tăng dần ({len(sorted_data)} dòng)")
+                    log(f"Đã sort sheet theo page tăng dần + thời gian ({len(sorted_data)} dòng)")
             except Exception as e:
-                log(f"Lỗi khi sort sheet: {e}")
-        # Batch update views + hidden vẫn giữ nguyên (không ảnh hưởng thứ tự)
+                log(f"Lỗi sort sheet: {e}")
         if batch_requests:
             worksheet.batch_update(batch_requests)
             log(f"Batch update {len(batch_requests)//2} tin cũ trang {page}")
@@ -345,6 +361,7 @@ def scrape_data():
         time.sleep(SLEEP_BETWEEN_PAGES)
     driver.quit()
     log(f"Hoàn thành: +{total_new} mới | ↑{total_updated} cập nhật")
+
 if __name__ == "__main__":
     try:
         scrape_data()
