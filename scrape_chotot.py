@@ -294,8 +294,14 @@ def scrape_data():
 
             if link in link_to_row:
                 row = link_to_row[link]
-                batch_requests.append({"range": f"G{row}", "values": [[str(data["views"])]])
-                batch_requests.append({"range": f"I{row}", "values": [[str(page)]]})
+                batch_requests.append({
+                    "range": f"G{row}",  # Views - cột G
+                    "values": [[str(data["views"])]]
+                })
+                batch_requests.append({
+                    "range": f"I{row}",  # Hidden - cột I
+                    "values": [[str(page)]]
+                })
                 total_updated += 1
             else:
                 existing_links.add(link)
