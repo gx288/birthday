@@ -20,7 +20,7 @@ jobs:
 
     - name: Install Dependencies
       run: |
-        pip install selenium gspread oauth2client requests
+        pip install selenium gspread oauth2client requests bs4
 
     - name: Run Scraper
       env:
