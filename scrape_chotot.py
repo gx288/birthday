@@ -19,8 +19,9 @@ START_URL = "https://www.chotot.com/mua-ban-nhac-cu-ha-noi?price=0-2100000&f=p&l
 SHEET_ID = "14tqKftTqlesnb0NqJZU-_f1EsWWywYqO36NiuDdmaTo"
 SHEET_NAME = "Chợ tốt"
 
-MAX_PAGES = 10          # Giới hạn an toàn, tránh chạy vô hạn
-MAX_EMPTY_PAGES = 2     # Dừng nếu liên tục X trang không có item mới
+MAX_PAGES = 12              # Giới hạn an toàn
+MAX_CONSECUTIVE_EMPTY = 3   # Dừng nếu liên tục mấy trang không có tin mới
+SLEEP_BETWEEN_PAGES = 3.0   # giây
 
 def log(message):
     now = datetime.now().strftime("%H:%M:%S")
@@ -33,40 +34,52 @@ def get_telegram_config():
     }
 
 def setup_driver():
-    log("🌐 Khởi tạo Chrome headless...")
+    log("Khởi tạo Chrome headless...")
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
     driver = webdriver.Chrome(options=options)
     return driver
 
 def connect_google_sheet():
-    log("📂 Kết nối Google Sheets...")
+    log("Kết nối Google Sheets...")
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds_json = json.loads(os.environ.get("GOOGLE_CREDENTIALS", "{}"))
-    if not creds_json:
+    creds_json_str = os.environ.get("GOOGLE_CREDENTIALS")
+    if not creds_json_str:
         raise ValueError("Không tìm thấy biến môi trường GOOGLE_CREDENTIALS")
 
+    creds_json = json.loads(creds_json_str)
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
     client = gspread.authorize(creds)
     sh = client.open_by_key(SHEET_ID)
 
     try:
         worksheet = sh.worksheet(SHEET_NAME)
-        log(f"✅ Tìm thấy sheet: {SHEET_NAME}")
+        log(f"Tìm thấy sheet: {SHEET_NAME}")
     except gspread.WorksheetNotFound:
-        log(f"⚠️ Tạo sheet mới: {SHEET_NAME}")
-        worksheet = sh.add_worksheet(title=SHEET_NAME, rows=1000, cols=10)
-        headers = ["Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Scraped At"]
+        log(f"Tạo sheet mới: {SHEET_NAME}")
+        worksheet = sh.add_worksheet(title=SHEET_NAME, rows=1200, cols=10)
+        headers = [
+            "Title", "Price", "Link", "Time Posted", "Location",
+            "Seller", "Views", "Scraped At", "Page"
+        ]
         worksheet.append_row(headers)
-    
+        log("Đã tạo header")
+
+    # Đảm bảo có cột Page (cột thứ 9)
+    headers = worksheet.row_values(1)
+    if "Page" not in headers:
+        col_index = len(headers) + 1
+        worksheet.update_cell(1, col_index, "Page")
+        log(f"Đã thêm cột Page ở cột {col_index}")
+
     return worksheet
 
 def send_telegram_alert(item):
@@ -81,7 +94,8 @@ def send_telegram_alert(item):
         f"👤 {item['seller']}\n"
         f"👀 {item['views']} views\n"
         f"📍 {item['location']}\n"
-        f"⏰ {item['time']}\n\n"
+        f"⏰ {item['time']}\n"
+        f"Trang {item['page']}\n\n"
         f"<a href='{item['link']}'>🔗 Xem chi tiết</a>"
     )
 
@@ -93,109 +107,96 @@ def send_telegram_alert(item):
         "disable_web_page_preview": False
     }
     try:
-        resp = requests.post(url, json=payload, timeout=10)
-        if resp.status_code != 200:
-            log(f"Telegram lỗi {resp.status_code}: {resp.text[:100]}")
+        requests.post(url, json=payload, timeout=12)
     except Exception as e:
-        log(f"❌ Gửi Telegram thất bại: {e}")
+        log(f"Telegram lỗi: {e}")
 
-def is_end_of_results(driver):
+def page_has_no_results(driver):
     try:
-        body = driver.find_element(By.TAG_NAME, "body").text
-        if any(phrase in body.lower() for phrase in ["không có kết quả", "không tìm thấy tin"]):
+        text = driver.find_element(By.TAG_NAME, "body").text.lower()
+        if any(x in text for x in ["không có kết quả", "không tìm thấy", "0 tin đăng"]):
             return True
     except:
         pass
     return False
 
 def scrape_data():
-    log("🚀 BẮT ĐẦU SCRAPE CHỢ TỐT - Nhạc cụ Hà Nội (≤ 2.1tr)")
+    log("BẮT ĐẦU QUÉT CHỢ TỐT - Nhạc cụ Hà Nội ≤ 2.1 triệu")
 
     worksheet = connect_google_sheet()
 
-    # Lấy tất cả link đã có (cột C - index 3)
+    # Lấy tất cả link cũ (cột C = 3)
     try:
-        existing_links = set(worksheet.col_values(3)[1:])  # Bỏ header
-        log(f"📊 Đã có {len(existing_links)} tin cũ trong sheet")
+        existing_links = set(link for link in worksheet.col_values(3)[1:] if link.strip())
+        log(f"Đã có {len(existing_links):,} tin cũ trong sheet")
     except Exception as e:
-        log(f"⚠️ Không đọc được cột link: {e}")
+        log(f"Không đọc được cột link: {e}")
         existing_links = set()
 
     driver = setup_driver()
-    new_items = []               # Giữ nguyên thứ tự scrape
+    total_new = 0
     page = 1
-    consecutive_empty_pages = 0
+    consecutive_empty = 0
 
     while page <= MAX_PAGES:
         url = START_URL if page == 1 else f"{START_URL}&page={page}"
-        log(f"\n📄 Trang {page} → {url}")
+        log(f"Trang {page} → {url}")
 
         try:
             driver.get(url)
-            WebDriverWait(driver, 12).until(
+            WebDriverWait(driver, 15).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "li.a14axl8t"))
             )
         except Exception as e:
-            log(f"⌛ Timeout hoặc lỗi load trang {page}: {e}")
-            if is_end_of_results(driver):
-                log("🛑 Phát hiện hết kết quả → dừng")
+            log(f"Timeout hoặc lỗi load trang {page}: {str(e)[:120]}")
+            if page_has_no_results(driver):
+                log("Phát hiện hết kết quả → dừng")
                 break
-            consecutive_empty_pages += 1
-            if consecutive_empty_pages >= MAX_EMPTY_PAGES:
-                log(f"🚫 {MAX_EMPTY_PAGES} trang liên tiếp không có dữ liệu mới → dừng")
+            consecutive_empty += 1
+            if consecutive_empty >= MAX_CONSECUTIVE_EMPTY:
+                log(f"{MAX_CONSECUTIVE_EMPTY} trang liên tiếp không có dữ liệu → dừng")
                 break
             page += 1
-            time.sleep(2.5)
+            time.sleep(SLEEP_BETWEEN_PAGES + 0.8)
             continue
 
-        if is_end_of_results(driver):
-            log("🛑 Hết kết quả tìm kiếm → dừng")
+        if page_has_no_results(driver):
+            log("Hết kết quả tìm kiếm → dừng")
             break
 
         items = driver.find_elements(By.CSS_SELECTOR, "li.a14axl8t")
-        log(f"🔍 Tìm thấy {len(items)} item trên trang")
+        log(f"Tìm thấy {len(items)} item trên trang")
 
-        new_on_this_page = 0
+        new_items_this_page = []
 
-        for idx, item in enumerate(items, 1):
+        for item in items:
             try:
-                a_tag = item.find_element(By.TAG_NAME, "a")
-                link = a_tag.get_attribute("href")
+                a = item.find_element(By.TAG_NAME, "a")
+                link = a.get_attribute("href")
                 if not link.startswith("http"):
                     link = BASE_URL + link.strip()
 
                 if link in existing_links:
                     continue
 
-                # Đánh dấu đã thấy (ngay cả khi lỗi sau vẫn tránh lặp lại)
                 existing_links.add(link)
 
                 title = item.find_element(By.CSS_SELECTOR, "h3").text.strip() or "Không có tiêu đề"
 
-                try:
-                    price = item.find_element(By.CSS_SELECTOR, "span.bfe6oav").text.strip()
-                except:
-                    price = "Thỏa thuận"
+                try: price = item.find_element(By.CSS_SELECTOR, "span.bfe6oav").text.strip()
+                except: price = "Thỏa thuận"
 
-                try:
-                    time_posted = item.find_element(By.CSS_SELECTOR, "span.c1u6gyxh.tx5yyjc").text.strip()
-                except:
-                    time_posted = "N/A"
+                try: time_posted = item.find_element(By.CSS_SELECTOR, "span.c1u6gyxh.tx5yyjc").text.strip()
+                except: time_posted = "N/A"
 
-                try:
-                    location = item.find_element(By.CSS_SELECTOR, "span.c1u6gyxh:not(.tx5yyjc)").text.strip()
-                except:
-                    location = "Hà Nội"
+                try: location = item.find_element(By.CSS_SELECTOR, "span.c1u6gyxh:not(.tx5yyjc)").text.strip()
+                except: location = "Hà Nội"
 
-                try:
-                    seller = item.find_element(By.CSS_SELECTOR, "div.dteznpi span.brnpcl3").text.strip()
-                except:
-                    seller = "Ẩn danh"
+                try: seller = item.find_element(By.CSS_SELECTOR, "div.dteznpi span.brnpcl3").text.strip()
+                except: seller = "Ẩn danh"
 
-                try:
-                    views = item.find_element(By.CSS_SELECTOR, "div.vglk6qt span").text.strip()
-                except:
-                    views = "0"
+                try: views = item.find_element(By.CSS_SELECTOR, "div.vglk6qt span").text.strip()
+                except: views = "0"
 
                 item_data = {
                     "title": title,
@@ -205,57 +206,63 @@ def scrape_data():
                     "location": location,
                     "seller": seller,
                     "views": views,
-                    "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "page": page
                 }
 
-                new_items.append(item_data)
-                new_on_this_page += 1
+                new_items_this_page.append(item_data)
 
-                log(f"  {idx:2d} | MỚI | {title[:60]:<60} | {price:>12} | {seller}")
-
-                # Gửi thông báo ngay (tùy chọn – có thể comment nếu muốn gửi hàng loạt)
-                send_telegram_alert(item_data)
-
-            except Exception as e:
-                # Bỏ qua item lỗi, không làm dừng cả trang
+            except:
                 continue
 
-        if new_on_this_page == 0:
-            consecutive_empty_pages += 1
-            log("Trang này không có tin mới nào")
+        new_count = len(new_items_this_page)
+        total_new += new_count
+
+        if new_count > 0:
+            log(f"→ Trang {page}: **{new_count} tin mới**")
+            consecutive_empty = 0
+
+            # Gửi Telegram (nếu muốn gửi từng tin)
+            for item in new_items_this_page:
+                send_telegram_alert(item)
+
+            # Chuẩn bị dữ liệu để append
+            rows = [[
+                d["title"],
+                d["price"],
+                d["link"],
+                d["time"],
+                d["location"],
+                d["seller"],
+                d["views"],
+                d["scraped_at"],
+                d["page"]
+            ] for d in new_items_this_page]
+
+            try:
+                worksheet.append_rows(rows)
+                log(f"Đã lưu {new_count} dòng từ trang {page}")
+            except Exception as e:
+                log(f"Lỗi append trang {page}: {e}")
+
         else:
-            consecutive_empty_pages = 0
+            log(f"Trang {page}: không có tin mới")
+            consecutive_empty += 1
 
         page += 1
-        time.sleep(2.8 + (page % 3))  # Giảm nguy cơ bị chặn
+        time.sleep(SLEEP_BETWEEN_PAGES + (page % 4) * 0.4)  # jitter nhẹ
 
     driver.quit()
 
-    # Lưu tất cả tin mới theo thứ tự đã scrape
-    if new_items:
-        log(f"\n🎉 Tìm được {len(new_items)} tin mới!")
-
-        rows = [[
-            i["title"],
-            i["price"],
-            i["link"],
-            i["time"],
-            i["location"],
-            i["seller"],
-            i["views"],
-            i["scraped_at"]
-        ] for i in new_items]
-
-        try:
-            worksheet.append_rows(rows)
-            log("💾 Đã lưu vào sheet thành công (theo thứ tự trên web)")
-        except Exception as e:
-            log(f"❌ Lỗi khi append vào sheet: {e}")
+    if total_new > 0:
+        log(f"\nHoàn thành - Tìm được tổng cộng **{total_new}** tin mới")
     else:
-        log("💤 Không có tin mới nào.")
+        log("\nKhông tìm thấy tin mới nào trong lần quét này")
 
 if __name__ == "__main__":
     try:
         scrape_data()
+    except KeyboardInterrupt:
+        log("Dừng bởi người dùng")
     except Exception as e:
-        log(f"💥 LỖI CHÍNH: {e}")
+        log(f"LỖI CHƯƠNG TRÌNH: {e}")
