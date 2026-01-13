@@ -330,25 +330,27 @@ def scrape_data():
         if new_rows:
             log(f"Thêm {len(new_rows)} tin mới từ trang {page}")
             worksheet.append_rows(new_rows)
-            # Sort toàn bộ sheet theo (page tăng dần, STT tăng dần)
-            try:
-                all_data = worksheet.get_all_values()[1:]  # từ dòng 2
-                if all_data:
-                    sorted_data = sorted(
-                        all_data,
-                        key=lambda row: (
-                            int(row[8]) if len(row) > 8 and row[8].isdigit() else 999,  # Hidden/page tăng dần
-                            int(row[9]) if len(row) > 9 and row[9].isdigit() else 999   # STT tăng dần
-                        ),
-                        reverse=False
-                    )
-                    worksheet.clear()
-                    worksheet.append_row(["Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Scraped At", "Hidden", "STT"])
-                    worksheet.append_rows(sorted_data)
-                    worksheet.delete_columns(10)  # Xóa cột STT tạm
-                    log(f"Đã sort sheet theo page tăng dần + STT trong page ({len(sorted_data)} dòng)")
-            except Exception as e:
-                log(f"Lỗi sort sheet: {e}")
+            log(f"Đã append {len(new_rows)} tin mới")
+        # Luôn sort lại sheet sau mỗi page (để đảm bảo thứ tự đúng dù có tin mới hay không)
+        try:
+            all_data = worksheet.get_all_values()[1:]  # từ dòng 2
+            if all_data:
+                sorted_data = sorted(
+                    all_data,
+                    key=lambda row: (
+                        int(row[8]) if len(row) > 8 and row[8].isdigit() else 999,  # Hidden/page tăng dần
+                        int(row[9]) if len(row) > 9 and row[9].isdigit() else 999   # STT tăng dần
+                    ),
+                    reverse=False
+                )
+                worksheet.clear()
+                worksheet.append_row(["Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Scraped At", "Hidden", "STT"])
+                worksheet.append_rows(sorted_data)
+                # KHÔNG XÓA cột STT để bạn kiểm tra (comment dòng dưới nếu muốn xóa sau)
+                # worksheet.delete_columns(10)
+                log(f"Đã sort lại sheet theo page tăng dần + STT trong page ({len(sorted_data)} dòng). Cột STT tạm ở cột J để kiểm tra.")
+        except Exception as e:
+            log(f"Lỗi sort sheet: {e}")
         if batch_requests:
             worksheet.batch_update(batch_requests)
             log(f"Batch update {len(batch_requests)//2} tin cũ trang {page}")
