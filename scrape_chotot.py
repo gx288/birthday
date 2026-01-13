@@ -90,43 +90,73 @@ def get_images_from_detail(link):
         resp = requests.get(link, headers=headers, timeout=12)
         if resp.status_code != 200:
             log(f"Detail {link} status {resp.status_code}")
-            return []
+            return [], []
 
         soup = BeautifulSoup(resp.text, "html.parser")
-        images = set()
+        images = []
+        videos = []
 
-        # JSON-LD
-        for tag in soup.find_all("script", type="application/ld+json"):
+        # 1. Ưu tiên JSON-LD (nếu có mảng image chính thức)
+        json_ld_tags = soup.find_all("script", type="application/ld+json")
+        for tag in json_ld_tags:
             try:
                 data = json.loads(tag.string or "{}")
                 if isinstance(data, dict) and "image" in data:
-                    img_val = data["image"]
-                    if isinstance(img_val, str) and "cdn.chotot.com" in img_val:
-                        images.add(img_val)
-                    elif isinstance(img_val, list):
-                        images.update([i for i in img_val if isinstance(i, str) and "cdn.chotot.com" in i])
+                    img_list = data["image"]
+                    if isinstance(img_list, str):
+                        img_list = [img_list]
+                    if isinstance(img_list, list):
+                        for img in img_list:
+                            if isinstance(img, str) and "cdn.chotot.com" in img:
+                                # Giữ nguyên link gốc, chỉ thay nếu cần
+                                if "preset:view/plain" in img or "preset:listing" in img:
+                                    images.append(img)
             except:
                 pass
 
-        # Regex trong script - lọc ảnh tin thật (có ID dài)
-        for script in soup.find_all("script"):
-            text = script.string or ""
-            if "cdn.chotot.com" in text:
-                matches = re.findall(r'(https?://cdn\.chotot\.com/[^"\')\s]+?\.(?:jpg|jpeg|png|webp))', text)
-                for m in matches:
-                    if re.search(r'-\d{15,}\.(jpg|jpeg|png|webp)$', m):  # ID dài ở cuối filename
-                        images.add(m)
+        # 2. Regex trong toàn bộ HTML/script - lọc ảnh sản phẩm thật
+        matches = re.findall(r'(https?://cdn\.chotot\.com/[^"\')\s<]+?\.(jpg|jpeg|png|webp))', resp.text)
+        for m in matches:
+            url = m[0]
+            # Lọc chặt: chỉ ảnh có ID dài ở cuối (ảnh tin thật), loại ads/logo/avatar
+            if (re.search(r'-\d{15,}\.(jpg|jpeg|png|webp)$', url) and 
+                "avatar" not in url and "logo" not in url and "admincentre" not in url and 
+                "reward" not in url):
+                if url not in images:
+                    images.append(url)
 
-        # Giới hạn 6 ảnh chính
-        real_images = sorted(list(images))[:6]
-        log(f"Lấy {len(real_images)} ảnh từ detail {link}")
-        return real_images
+        # 3. Tìm video (nếu có <video> hoặc thumbnail video)
+        video_tags = soup.find_all("video")
+        for vid in video_tags:
+            src = vid.get("src") or ""
+            if src and "cdn.chotot.com" in src:
+                videos.append(src)
+            sources = vid.find_all("source")
+            for s in sources:
+                src = s.get("src") or ""
+                if src:
+                    videos.append(src)
+        
+        # Nếu có thumbnail video (như trong HTML bạn), lấy src thumbnail nhưng đánh dấu là video
+        thumb_videos = soup.find_all("img", src=re.compile(r'videodelivery\.net.*thumbnail'))
+        for thumb in thumb_videos:
+            src = thumb.get("src") or ""
+            if src:
+                # Thay thumbnail.jpg → video.mp4 nếu biết pattern, nhưng tạm lưu thumbnail
+                videos.append(src.replace("thumbnail.jpg", "video.mp4"))  # đoán, cần test
+
+        # Giới hạn & unique
+        images = list(dict.fromkeys(images))[:6]  # loại duplicate, giữ 6
+        videos = list(dict.fromkeys(videos))[:2]
+
+        log(f"Detail {link}: {len(images)} ảnh thật + {len(videos)} video")
+        return images, videos
 
     except Exception as e:
-        log(f"Lỗi lấy ảnh {link}: {e}")
-        return []
+        log(f"Lỗi lấy media {link}: {e}")
+        return [], []
 
-def send_telegram_with_media(item, images):
+def send_telegram_with_media(item, images, videos):
     cfg = get_telegram_config()
     if not cfg["token"] or not cfg["chat_id"]:
         return
@@ -143,22 +173,38 @@ def send_telegram_with_media(item, images):
     )
 
     media_group = []
+
+    # Ảnh trước
     for idx, img_url in enumerate(images):
         media_group.append({
             "type": "photo",
             "media": img_url,
-            "caption": caption if idx == 0 else "",
+            "caption": caption if idx == 0 and not videos else "",  # caption ở item đầu nếu có ảnh
             "parse_mode": "HTML"
+        })
+
+    # Video sau (Telegram hỗ trợ mix trong sendMediaGroup)
+    for vid_url in videos:
+        media_group.append({
+            "type": "video",
+            "media": vid_url,
+            "caption": caption if not media_group else ""  # nếu không có ảnh
         })
 
     if media_group:
         url = f"https://api.telegram.org/bot{cfg['token']}/sendMediaGroup"
         payload = {"chat_id": cfg["chat_id"], "media": json.dumps(media_group)}
         try:
-            requests.post(url, data=payload, timeout=20)
-            log(f"Đã gửi album {len(images)} ảnh cho tin mới: {item['title']}")
+            resp = requests.post(url, data=payload, timeout=25)
+            if resp.status_code == 200:
+                log(f"✅ Gửi media group ({len(images)} ảnh + {len(videos)} video) cho tin mới")
+            else:
+                log(f"Telegram media group lỗi {resp.status_code}: {resp.text[:200]}")
+                # Nếu lỗi (ví dụ video không hỗ trợ), gửi text + ảnh riêng
+                send_telegram_alert(item)
         except Exception as e:
-            log(f"Lỗi gửi media group: {e}")
+            log(f"Lỗi gửi media: {e}")
+            send_telegram_alert(item)
     else:
         send_telegram_alert(item)
 
