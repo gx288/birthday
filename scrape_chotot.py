@@ -76,6 +76,14 @@ def connect_google_sheet():
     if len(headers) < 9 or headers[8] != "Hidden":
         worksheet.update_cell(1, 9, "Hidden")
         log("Đảm bảo cột Hidden ở I")
+    
+    # TEST WRITE ĐƠN GIẢN để kiểm tra quyền
+    try:
+        worksheet.update_cell(1, 10, "TEST_WRITE_" + datetime.now().strftime("%H:%M:%S"))
+        log("TEST WRITE thành công: Cột J dòng 1 đã ghi 'TEST_WRITE_...'")
+    except Exception as e:
+        log(f"TEST WRITE THẤT BẠI → quyền hoặc quota lỗi: {e}")
+    
     return worksheet
 
 def is_valid_media_url(url):
@@ -346,13 +354,12 @@ def scrape_data():
                 worksheet.clear()
                 worksheet.append_row(["Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Scraped At", "Hidden", "STT"])
                 worksheet.append_rows(sorted_data)
-                # KHÔNG xóa cột STT để kiểm tra
                 log(f"Đã sort lại sheet ({len(sorted_data)} dòng). Cột STT tạm ở J.")
             else:
                 log("Không có dữ liệu để sort")
         except Exception as e:
             log(f"Lỗi sort sheet: {e}")
-        # Batch update tin cũ (retry 3 lần nếu lỗi quota)
+        # Batch update tin cũ với retry
         if batch_requests:
             for attempt in range(3):
                 try:
@@ -361,8 +368,8 @@ def scrape_data():
                     break
                 except gspread.exceptions.APIError as e:
                     if '429' in str(e) or 'Quota' in str(e):
-                        log(f"Quota exceeded, retry {attempt+1}/3 sau 10s...")
-                        time.sleep(10)
+                        log(f"Quota exceeded, retry {attempt+1}/3 sau 15s...")
+                        time.sleep(15)
                     else:
                         log(f"Lỗi batch update: {e}")
                         break
