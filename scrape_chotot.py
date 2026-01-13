@@ -78,14 +78,6 @@ def connect_google_sheet():
         log("Đảm bảo cột Hidden ở I")
     return worksheet
 
-def is_valid_media_url(url):
-    """Kiểm tra link ảnh/video tồn tại mà không tải toàn bộ file"""
-    try:
-        resp = requests.head(url, timeout=6, allow_redirects=True)
-        return resp.status_code == 200 and 'content-length' in resp.headers
-    except:
-        return False
-
 def get_images_from_detail(link):
     headers = {"User-Agent": random.choice(USER_AGENTS)}
     try:
@@ -96,7 +88,7 @@ def get_images_from_detail(link):
         soup = BeautifulSoup(resp.text, "html.parser")
         images = []
         videos = []
-        # 1. JSON-LD
+        # JSON-LD
         json_ld_tags = soup.find_all("script", type="application/ld+json")
         for tag in json_ld_tags:
             try:
@@ -112,7 +104,7 @@ def get_images_from_detail(link):
                                     images.append(img)
             except:
                 pass
-        # 2. Regex lọc ảnh thật
+        # Regex lọc ảnh thật
         matches = re.findall(r'(https?://cdn\.chotot\.com/[^"\')\s<]+?\.(jpg|jpeg|png|webp))', resp.text)
         for m in matches:
             url = m[0]
@@ -121,16 +113,16 @@ def get_images_from_detail(link):
                 "reward" not in url):
                 if url not in images:
                     images.append(url)
-        # 3. Video (thumbnail hoặc source)
+        # Video thumbnail
         thumb_videos = soup.find_all("img", src=re.compile(r'videodelivery\.net.*thumbnail'))
         for thumb in thumb_videos:
             src = thumb.get("src") or ""
             if src:
                 videos.append(src)
-        # Giới hạn
+        # Giới hạn & unique
         images = list(dict.fromkeys(images))[:6]
         videos = list(dict.fromkeys(videos))[:2]
-        log(f"Detail {link}: {len(images)} ảnh + {len(videos)} video (trước lọc tồn tại)")
+        log(f"Detail {link}: {len(images)} ảnh + {len(videos)} video")
         return images, videos
     except Exception as e:
         log(f"Lỗi lấy media {link}: {e}")
@@ -152,16 +144,13 @@ def send_telegram_with_media(item, images, videos):
         f"<a href='{item['link']}'>🔗 Xem chi tiết</a>"
     )
 
-    # Lọc chỉ link tồn tại
     valid_images = [img for img in images if is_valid_media_url(img)]
     valid_videos = [vid for vid in videos if is_valid_media_url(vid)]
 
     log(f"Sau lọc tồn tại: {len(valid_images)} ảnh + {len(valid_videos)} video")
 
     media_group = []
-    has_media = False
 
-    # Thêm ảnh
     for idx, img_url in enumerate(valid_images):
         media_group.append({
             "type": "photo",
@@ -169,16 +158,13 @@ def send_telegram_with_media(item, images, videos):
             "caption": caption if idx == 0 and not valid_videos else "",
             "parse_mode": "HTML"
         })
-        has_media = True
 
-    # Thêm video (nếu có)
     for vid_url in valid_videos:
         media_group.append({
             "type": "video",
             "media": vid_url,
             "caption": caption if not media_group else ""
         })
-        has_media = True
 
     if media_group:
         url = f"https://api.telegram.org/bot{cfg['token']}/sendMediaGroup"
@@ -186,16 +172,22 @@ def send_telegram_with_media(item, images, videos):
         try:
             resp = requests.post(url, data=payload, timeout=30)
             if resp.status_code == 200:
-                log(f"✅ Gửi media group thành công ({len(valid_images)} ảnh + {len(valid_videos)} video)")
+                log(f"✅ Gửi media group thành công")
             else:
-                log(f"Media group lỗi {resp.status_code}: {resp.text[:200]} → gửi text thay thế")
+                log(f"Media group lỗi {resp.status_code}: {resp.text[:200]} → gửi text")
                 send_telegram_alert(item)
         except Exception as e:
-            log(f"Lỗi gửi media group: {e} → gửi text thay thế")
+            log(f"Lỗi gửi media group: {e} → gửi text")
             send_telegram_alert(item)
     else:
-        log("Không có media hợp lệ → gửi text")
         send_telegram_alert(item)
+
+def is_valid_media_url(url):
+    try:
+        resp = requests.head(url, timeout=6, allow_redirects=True)
+        return resp.status_code == 200
+    except:
+        return False
 
 def send_telegram_alert(item):
     cfg = get_telegram_config()
@@ -306,27 +298,31 @@ def scrape_data():
         log(f"Tìm thấy {len(items)} item")
         new_rows = []
         batch_requests = []
+        item_order = 0  # thứ tự trong page
         for item_el in items:
             data = extract_item_data(item_el, page)
             if not data:
                 continue
             link = data["link"]
+            item_order += 1  # tăng thứ tự quét (tin đầu page = 1)
             if link in link_to_row:
                 row = link_to_row[link]
                 batch_requests.append({
-                    "range": f"G{row}",  # Views - cột G
+                    "range": f"G{row}",
                     "values": [[str(data["views"])]]
                 })
                 batch_requests.append({
-                    "range": f"I{row}",  # Hidden - cột I
+                    "range": f"I{row}",
                     "values": [[str(page)]]
                 })
                 total_updated += 1
             else:
                 existing_links.add(link)
+                # Thêm cột tạm "Order" (cột 10) để sort ổn định trong page
                 new_rows.append([
                     data["title"], data["price"], link, data["time"], data["location"],
-                    data["seller"], str(data["views"]), data["scraped_at"], str(page)
+                    data["seller"], str(data["views"]), data["scraped_at"], str(page),
+                    str(item_order)  # cột tạm Order
                 ])
                 images, videos = get_images_from_detail(link)
                 send_telegram_with_media(data, images, videos)
@@ -335,19 +331,26 @@ def scrape_data():
             log(f"Thêm {len(new_rows)} tin mới từ trang {page}")
             # Append
             worksheet.append_rows(new_rows)
-            # Sort lại toàn bộ sheet theo cột Hidden (page) tăng dần
+            # Sort lại toàn bộ sheet
             try:
                 all_data = worksheet.get_all_values()[1:]  # từ dòng 2
                 if all_data:
+                    # Sort: page tăng dần (cột 9 index 8), rồi Order tăng dần (cột 10 index 9)
                     sorted_data = sorted(
                         all_data,
-                        key=lambda row: (int(row[8]) if len(row) > 8 and row[8].isdigit() else 999, row[7]),  # page tăng dần, rồi Scraped At
+                        key=lambda row: (
+                            int(row[8]) if len(row) > 8 and row[8].isdigit() else 999,
+                            int(row[9]) if len(row) > 9 and row[9].isdigit() else 999
+                        ),
                         reverse=False
                     )
                     worksheet.clear()
-                    worksheet.append_row(["Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Scraped At", "Hidden"])
+                    # Header có thêm cột Order tạm (cột J)
+                    worksheet.append_row(["Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Scraped At", "Hidden", "Order"])
                     worksheet.append_rows(sorted_data)
-                    log(f"Đã sort sheet theo page tăng dần + thời gian ({len(sorted_data)} dòng)")
+                    # Xóa cột Order tạm (cột J)
+                    worksheet.delete_columns(10)
+                    log(f"Đã sort sheet theo page tăng dần + thứ tự trong page ({len(sorted_data)} dòng)")
             except Exception as e:
                 log(f"Lỗi sort sheet: {e}")
         if batch_requests:
