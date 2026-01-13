@@ -1,3 +1,7 @@
+# scrape_chotot.py - Full code with batch update to avoid 429 Quota Exceeded
+# Updated: Batch update Views & Hidden using worksheet.batch_update()
+# Only append new items, update existing ones (Views + Hidden)
+
 import os
 import json
 import time
@@ -21,7 +25,7 @@ SHEET_NAME = "Chợ tốt"
 
 MAX_PAGES = 12
 MAX_CONSECUTIVE_EMPTY = 3
-SLEEP_BETWEEN_PAGES = 3.5
+SLEEP_BETWEEN_PAGES = 4.0  # Tăng để an toàn hơn với quota
 
 def log(message):
     now = datetime.now().strftime("%H:%M:%S")
@@ -79,7 +83,7 @@ def connect_google_sheet():
         log(f"Mở rộng sheet lên 10 cột")
         worksheet.resize(cols=10)
 
-    # Kiểm tra và đảm bảo cột cuối là "Hidden"
+    # Đảm bảo cột cuối là "Hidden"
     headers = worksheet.row_values(1)
     if len(headers) < 9 or headers[8] != "Hidden":
         if "Hidden" in headers:
@@ -117,6 +121,7 @@ def send_telegram_alert(item):
             json={"chat_id": cfg["chat_id"], "text": message, "parse_mode": "HTML"},
             timeout=10
         )
+        log(f"Đã gửi Telegram: {item['title'][:50]}...")
     except Exception as e:
         log(f"Telegram gửi lỗi: {e}")
 
@@ -240,7 +245,7 @@ def scrape_data():
         log(f"Tìm thấy {len(items)} mục trên trang")
 
         new_rows = []
-        updates = []  # [(row, views, page), ...]
+        batch_update_requests = []  # cho batch_update
 
         for item_el in items:
             data = extract_item_data(item_el, page)
@@ -250,13 +255,23 @@ def scrape_data():
             link = data["link"]
 
             if link in link_to_row:
-                # Tin cũ → update Views & Hidden
+                # Tin cũ → chuẩn bị batch update
                 row_num = link_to_row[link]
-                updates.append((row_num, data["views"], data["page"]))
+                # Views (cột G = 7)
+                batch_update_requests.append({
+                    "range": f"G{row_num}",
+                    "values": [[str(data["views"])]]
+                })
+                # Hidden (cột I = 9)
+                batch_update_requests.append({
+                    "range": f"I{row_num}",
+                    "values": [[str(data["page"])]]
+                })
+                total_updated += 1
             else:
                 # Tin mới → append
                 existing_links.add(link)
-                link_to_row[link] = -1  # placeholder, sẽ cập nhật sau nếu cần
+                link_to_row[link] = -1  # placeholder
                 new_rows.append([
                     data["title"],
                     data["price"],
@@ -271,7 +286,7 @@ def scrape_data():
                 total_new += 1
                 send_telegram_alert(data)
 
-        # Thực hiện append tin mới
+        # 1. Append tin mới (một request)
         if new_rows:
             try:
                 worksheet.append_rows(new_rows)
@@ -279,18 +294,15 @@ def scrape_data():
             except Exception as e:
                 log(f"Lỗi append: {e}")
 
-        # Thực hiện update tin cũ (batch)
-        if updates:
-            for row_num, views_val, page_val in updates:
-                try:
-                    worksheet.update_cell(row_num, 7, str(views_val))   # Views - cột G (7)
-                    worksheet.update_cell(row_num, 9, str(page_val))    # Hidden - cột I (9)
-                except Exception as upd_err:
-                    log(f"Lỗi update row {row_num}: {upd_err}")
-            log(f"Đã cập nhật {len(updates)} tin cũ (views + Hidden) từ trang {page}")
-            total_updated += len(updates)
+        # 2. Batch update tất cả views + hidden (chỉ 1 request!)
+        if batch_update_requests:
+            try:
+                worksheet.batch_update(batch_update_requests)
+                log(f"Batch-update {len(batch_update_requests)} ô (views + hidden) cho {len(batch_update_requests)//2} tin cũ từ trang {page}")
+            except Exception as e:
+                log(f"Lỗi batch update trang {page}: {e}")
 
-        if not new_rows and not updates:
+        if not new_rows and not batch_update_requests:
             consecutive_empty += 1
             log(f"Trang {page}: không có thay đổi")
         else:
