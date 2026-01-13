@@ -247,25 +247,23 @@ def scrape_data():
     log("🚀 BẮT ĐẦU QUÉT CHỢ TỐT - Nhạc cụ Hà Nội ≤ 2.1tr")
     worksheet = connect_google_sheet()
 
-    # Đọc dữ liệu hiện tại
+    # Đọc dữ liệu hiện tại để lấy map link → row
     try:
         all_values = worksheet.get_all_values()
         existing_data = all_values[1:] if len(all_values) > 1 else []
         
-        link_info = {}
+        link_to_row = {}
         for i, row in enumerate(existing_data, start=2):
             if len(row) >= 4 and row[3].strip():  # cột Link (D)
                 link = row[3].strip()
-                stt = row[0].strip() if len(row) > 0 else ""
-                hidden = row[8].strip() if len(row) > 8 else ""
-                link_info[link] = {"row": i, "stt": stt, "hidden": hidden}
+                link_to_row[link] = i
         
-        existing_links = set(link_info.keys())
+        existing_links = set(link_to_row.keys())
         log(f"Đọc {len(existing_links)} tin cũ từ sheet")
     except Exception as e:
         log(f"Lỗi đọc sheet: {e}")
         existing_links = set()
-        link_info = {}
+        link_to_row = {}
 
     driver = setup_driver()
     total_new = 0
@@ -273,7 +271,11 @@ def scrape_data():
     page = 1
     consecutive_empty = 0
 
-    current_run_items = []  # Để sort lại sau
+    global_stt_counter = 1  # STT toàn cục bắt đầu từ 1 cho lần chạy này
+    page_stt_logs = []      # Để gom log theo từng page
+
+    batch_updates = []      # Gom tất cả update (STT, Views, Hidden) cho tin cũ
+    new_rows = []           # Dòng mới để append
 
     while page <= MAX_PAGES:
         url = START_URL if page == 1 else f"{START_URL}&page={page}"
@@ -299,10 +301,8 @@ def scrape_data():
         items = driver.find_elements(By.CSS_SELECTOR, "li.a14axl8t")
         log(f"Trang {page}: Tìm thấy {len(items)} tin")
 
-        current_page_stt = 1
-
-        batch_updates = []
-        page_new_rows = []
+        page_stt_start = global_stt_counter
+        page_item_count = 0
 
         for item_el in items:
             data = extract_item_data(item_el, page)
@@ -310,15 +310,14 @@ def scrape_data():
                 continue
 
             link = data["link"]
+            page_item_count += 1
 
-            images = []
-            if link not in existing_links:
-                images = get_images_from_detail(link)
-                send_telegram_with_media(data, images)
-                total_new += 1
+            current_stt = global_stt_counter
+            global_stt_counter += 1
 
+            # Chuẩn bị dữ liệu cho dòng
             row_data = [
-                "",                    # STT - điền sau
+                str(current_stt),      # STT
                 data["title"],
                 data["price"],
                 link,
@@ -326,11 +325,17 @@ def scrape_data():
                 data["location"],
                 data["seller"],
                 str(data["views"]),
-                str(page)              # Hidden = page hiện tại nếu còn xuất hiện
+                str(page)              # Hidden = page nếu còn xuất hiện
             ]
 
+            # Xử lý tin cũ / mới
             if link in existing_links:
-                row_num = link_info[link]["row"]
+                row_num = link_to_row[link]
+                # Update STT mới, Views, Hidden
+                batch_updates.append({
+                    "range": f"A{row_num}",  # STT
+                    "values": [[str(current_stt)]]
+                })
                 batch_updates.append({
                     "range": f"H{row_num}",  # Views
                     "values": [[str(data["views"])]]
@@ -341,24 +346,22 @@ def scrape_data():
                 })
                 total_updated += 1
             else:
-                page_new_rows.append(row_data)
-                existing_links.add(link)
+                # Tin mới → chuẩn bị append
+                images = get_images_from_detail(link)
+                send_telegram_with_media(data, images)
+                new_rows.append(row_data)
+                total_new += 1
+                existing_links.add(link)  # Cập nhật để lần sau nhận diện
 
-            # Lưu để sort sau
-            current_run_items.append({
-                "page": page,
-                "stt_on_page": current_page_stt,
-                "data": row_data,
-                "link": link
-            })
+        # Log cho page này
+        if page_item_count > 0:
+            page_stt_logs.append(
+                f"Trang {page}: {page_item_count} tin, STT từ {page_stt_start} → {global_stt_counter-1}"
+            )
+        else:
+            page_stt_logs.append(f"Trang {page}: Không có tin nào")
 
-            current_page_stt += 1
-
-        if batch_updates:
-            worksheet.batch_update(batch_updates)
-            log(f"Batch update {len(batch_updates)//2} tin cũ trang {page}")
-
-        if not page_new_rows and not batch_updates:
+        if page_item_count == 0:
             consecutive_empty += 1
         else:
             consecutive_empty = 0
@@ -368,42 +371,49 @@ def scrape_data():
 
     driver.quit()
 
-    # ── SORT LẠI TOÀN BỘ ───────────────────────────────────────────────
-    log("Bắt đầu sắp xếp lại toàn bộ sheet theo Page → STT...")
+    # In log tổng hợp theo page
+    log("=== THỐNG KÊ ĐÁNH STT THEO TỪNG TRANG ===")
+    for log_line in page_stt_logs:
+        log(log_line)
+    log(f"Tổng STT đã đánh: 1 → {global_stt_counter-1}")
 
-    # Sort: page tăng dần → stt_on_page tăng dần
-    current_run_items.sort(key=lambda x: (x["page"], x["stt_on_page"]))
+    # Thực hiện batch update cho tin cũ
+    if batch_updates:
+        worksheet.batch_update(batch_updates)
+        log(f"Đã batch update {len(batch_updates)//3} tin cũ (STT + Views + Hidden)")
 
-    final_rows = []
-    for item in current_run_items:
-        stt = len(final_rows) + 1
-        row = item["data"].copy()
-        row[0] = str(stt)  # Ghi STT toàn cục
-        final_rows.append(row)
+    # Append tin mới (nếu có)
+    if new_rows:
+        worksheet.append_rows(new_rows)
+        log(f"Đã thêm {len(new_rows)} tin mới vào sheet")
 
-    # Đánh dấu Hidden cho tin cũ không còn xuất hiện
-    current_links = {item["link"] for item in current_run_items}
-    hidden_updates = []
-    for link, info in link_info.items():
-        if link not in current_links and info["hidden"] != "Hidden":
-            hidden_updates.append({
-                "range": f"I{info['row']}",
-                "values": [["Hidden"]]
-            })
+    # ── SORT LẠI TOÀN BỘ SHEET (theo Page tăng dần → STT tăng dần) ───────────────
+    log("Bắt đầu sắp xếp lại toàn bộ sheet...")
+    try:
+        all_data = worksheet.get_all_values()
+        if len(all_data) <= 1:
+            log("Sheet trống hoặc chỉ có header → bỏ qua sort")
+        else:
+            header = all_data[0]
+            data_rows = all_data[1:]
 
-    if hidden_updates:
-        worksheet.batch_update(hidden_updates)
-        log(f"Đánh dấu Hidden cho {len(hidden_updates)} tin cũ mất đi")
+            # Sort: ưu tiên Page (cột I, index 8), sau đó STT (cột A, index 0)
+            sorted_rows = sorted(
+                data_rows,
+                key=lambda row: (
+                    int(row[8]) if row[8].isdigit() else 999999 if row[8] == "Hidden" else 0,
+                    int(row[0]) if row[0].isdigit() else 999999
+                )
+            )
 
-    # Xóa dữ liệu cũ và ghi lại
-    worksheet.clear()
-    worksheet.append_row(HEADERS)
-    
-    if final_rows:
-        worksheet.append_rows(final_rows)
-        log(f"Đã ghi lại {len(final_rows)} dòng (sort Page tăng dần → STT tăng dần)")
+            worksheet.clear()
+            worksheet.append_row(header)
+            worksheet.append_rows(sorted_rows)
+            log(f"Đã sort lại {len(sorted_rows)} dòng (Page ↑ → STT ↑)")
+    except Exception as e:
+        log(f"Lỗi khi sort sheet: {e}")
 
-    log(f"Hoàn thành: +{total_new} mới | ↑{total_updated} cập nhật | Tổng tin: {len(final_rows)}")
+    log(f"Hoàn thành: +{total_new} mới | ↑{total_updated} cập nhật | Tổng STT cuối: {global_stt_counter-1}")
 
 if __name__ == "__main__":
     try:
