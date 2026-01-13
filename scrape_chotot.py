@@ -314,9 +314,38 @@ def scrape_data():
                 total_new += 1
 
         if new_rows:
-            worksheet.append_rows(new_rows)
-            log(f"Thêm {len(new_rows)} tin mới trang {page}")
+            log(f"Thêm {len(new_rows)} tin mới từ trang {page}")
 
+            # Append như cũ
+            worksheet.append_rows(new_rows)
+
+            # Sau khi append → sort toàn bộ sheet theo cột Scraped At (cột 8) giảm dần
+            try:
+                # Lấy toàn bộ dữ liệu (bỏ header)
+                all_data = worksheet.get_all_values()[1:]  # từ dòng 2 trở đi
+
+                if all_data:
+                    # Sort theo cột 8 (Scraped At, index 7), reverse=True để mới nhất lên đầu
+                    sorted_data = sorted(
+                        all_data,
+                        key=lambda row: row[7] if len(row) > 7 else "",  # Scraped At
+                        reverse=True
+                    )
+
+                    # Xóa dữ liệu cũ (giữ header)
+                    worksheet.clear()
+
+                    # Viết lại header
+                    worksheet.append_row(["Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Scraped At", "Hidden"])
+
+                    # Viết lại dữ liệu đã sort
+                    worksheet.append_rows(sorted_data)
+
+                    log(f"Đã sort sheet theo Scraped At giảm dần ({len(sorted_data)} dòng)")
+            except Exception as e:
+                log(f"Lỗi khi sort sheet: {e}")
+
+        # Batch update views + hidden vẫn giữ nguyên (không ảnh hưởng thứ tự)
         if batch_requests:
             worksheet.batch_update(batch_requests)
             log(f"Batch update {len(batch_requests)//2} tin cũ trang {page}")
