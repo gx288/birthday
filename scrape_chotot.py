@@ -298,13 +298,13 @@ def scrape_data():
         log(f"Tìm thấy {len(items)} item")
         new_rows = []
         batch_requests = []
-        item_order = 0  # thứ tự trong page
+        stt = 0  # STT thứ tự item trên page (1 cho item đầu tiên trên HTML)
         for item_el in items:
+            stt += 1  # tăng STT cho từng item (tin đầu = 1, tin sau = 2,...)
             data = extract_item_data(item_el, page)
             if not data:
                 continue
             link = data["link"]
-            item_order += 1  # tăng thứ tự quét (tin đầu page = 1)
             if link in link_to_row:
                 row = link_to_row[link]
                 batch_requests.append({
@@ -318,40 +318,35 @@ def scrape_data():
                 total_updated += 1
             else:
                 existing_links.add(link)
-                # Thêm cột tạm "Order" (cột 10) để sort ổn định trong page
+                # Thêm cột STT tạm (cột 10)
                 new_rows.append([
                     data["title"], data["price"], link, data["time"], data["location"],
                     data["seller"], str(data["views"]), data["scraped_at"], str(page),
-                    str(item_order)  # cột tạm Order
+                    str(stt)  # STT thứ tự trên page
                 ])
                 images, videos = get_images_from_detail(link)
                 send_telegram_with_media(data, images, videos)
                 total_new += 1
-
         if new_rows:
             log(f"Thêm {len(new_rows)} tin mới từ trang {page}")
-            # Append với cột Order tạm (cột 10)
             worksheet.append_rows(new_rows)
-
-            # Sort toàn bộ sheet theo (Hidden/page tăng dần, Order tăng dần)
+            # Sort toàn bộ sheet theo (page tăng dần, STT tăng dần)
             try:
                 all_data = worksheet.get_all_values()[1:]  # từ dòng 2
                 if all_data:
                     sorted_data = sorted(
                         all_data,
                         key=lambda row: (
-                            int(row[8]) if len(row) > 8 and row[8].isdigit() else 999,  # Hidden (page) tăng dần
-                            int(row[9]) if len(row) > 9 and row[9].isdigit() else 999   # Order tăng dần
+                            int(row[8]) if len(row) > 8 and row[8].isdigit() else 999,  # Hidden/page tăng dần
+                            int(row[9]) if len(row) > 9 and row[9].isdigit() else 999   # STT tăng dần (tin đầu page ở trên)
                         ),
                         reverse=False
                     )
                     worksheet.clear()
-                    # Header có Order tạm
-                    worksheet.append_row(["Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Scraped At", "Hidden", "Order"])
+                    worksheet.append_row(["Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Scraped At", "Hidden", "STT"])
                     worksheet.append_rows(sorted_data)
-                    # Xóa cột Order (cột J = 10)
-                    worksheet.delete_columns(10)
-                    log(f"Đã sort sheet theo page tăng dần + thứ tự xuất hiện trong page ({len(sorted_data)} dòng)")
+                    worksheet.delete_columns(10)  # Xóa cột STT tạm
+                    log(f"Đã sort sheet theo page tăng dần + STT trong page ({len(sorted_data)} dòng)")
             except Exception as e:
                 log(f"Lỗi sort sheet: {e}")
         if batch_requests:
