@@ -95,7 +95,6 @@ def get_images_from_detail(link):
         soup = BeautifulSoup(resp.text, "html.parser")
         images = []
         videos = []
-        # JSON-LD
         json_ld_tags = soup.find_all("script", type="application/ld+json")
         for tag in json_ld_tags:
             try:
@@ -111,7 +110,6 @@ def get_images_from_detail(link):
                                     images.append(img)
             except:
                 pass
-        # Regex lọc ảnh thật
         matches = re.findall(r'(https?://cdn\.chotot\.com/[^"\')\s<]+?\.(jpg|jpeg|png|webp))', resp.text)
         for m in matches:
             url = m[0]
@@ -120,13 +118,11 @@ def get_images_from_detail(link):
                 "reward" not in url):
                 if url not in images:
                     images.append(url)
-        # Video thumbnail
         thumb_videos = soup.find_all("img", src=re.compile(r'videodelivery\.net.*thumbnail'))
         for thumb in thumb_videos:
             src = thumb.get("src") or ""
             if src:
                 videos.append(src)
-        # Giới hạn & unique
         images = list(dict.fromkeys(images))[:6]
         videos = list(dict.fromkeys(videos))[:2]
         log(f"Detail {link}: {len(images)} ảnh + {len(videos)} video")
@@ -209,6 +205,7 @@ def send_telegram_alert(item):
             json={"chat_id": cfg["chat_id"], "text": message, "parse_mode": "HTML"},
             timeout=10
         )
+        log("Gửi text Telegram thành công")
     except Exception as e:
         log(f"Lỗi gửi text Telegram: {e}")
 
@@ -298,9 +295,9 @@ def scrape_data():
         log(f"Tìm thấy {len(items)} item")
         new_rows = []
         batch_requests = []
-        stt = 0  # STT thứ tự item trên page (1 cho item đầu tiên trên HTML)
+        stt = 0
         for item_el in items:
-            stt += 1  # tăng STT cho từng item
+            stt += 1
             data = extract_item_data(item_el, page)
             if not data:
                 continue
@@ -318,42 +315,57 @@ def scrape_data():
                 total_updated += 1
             else:
                 existing_links.add(link)
-                # Thêm cột STT tạm (cột 10)
                 new_rows.append([
                     data["title"], data["price"], link, data["time"], data["location"],
                     data["seller"], str(data["views"]), data["scraped_at"], str(page),
-                    str(stt)  # STT thứ tự trên page
+                    str(stt)
                 ])
                 images, videos = get_images_from_detail(link)
                 send_telegram_with_media(data, images, videos)
                 total_new += 1
+        # Append tin mới
         if new_rows:
             log(f"Thêm {len(new_rows)} tin mới từ trang {page}")
-            worksheet.append_rows(new_rows)
-            log(f"Đã append {len(new_rows)} tin mới")
-        # Luôn sort lại sheet sau mỗi page (để đảm bảo thứ tự đúng dù có tin mới hay không)
+            try:
+                worksheet.append_rows(new_rows)
+                log("Append tin mới thành công")
+            except Exception as e:
+                log(f"Lỗi append tin mới: {e}")
+        # Luôn sort lại sheet
         try:
-            all_data = worksheet.get_all_values()[1:]  # từ dòng 2
+            all_data = worksheet.get_all_values()[1:]
             if all_data:
                 sorted_data = sorted(
                     all_data,
                     key=lambda row: (
-                        int(row[8]) if len(row) > 8 and row[8].isdigit() else 999,  # Hidden/page tăng dần
-                        int(row[9]) if len(row) > 9 and row[9].isdigit() else 999   # STT tăng dần
+                        int(row[8]) if len(row) > 8 and row[8].isdigit() else 999,
+                        int(row[9]) if len(row) > 9 and row[9].isdigit() else 999
                     ),
                     reverse=False
                 )
                 worksheet.clear()
                 worksheet.append_row(["Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Scraped At", "Hidden", "STT"])
                 worksheet.append_rows(sorted_data)
-                # KHÔNG XÓA cột STT để bạn kiểm tra (comment dòng dưới nếu muốn xóa sau)
-                # worksheet.delete_columns(10)
-                log(f"Đã sort lại sheet theo page tăng dần + STT trong page ({len(sorted_data)} dòng). Cột STT tạm ở cột J để kiểm tra.")
+                # KHÔNG xóa cột STT để kiểm tra
+                log(f"Đã sort lại sheet ({len(sorted_data)} dòng). Cột STT tạm ở J.")
+            else:
+                log("Không có dữ liệu để sort")
         except Exception as e:
             log(f"Lỗi sort sheet: {e}")
+        # Batch update tin cũ (retry 3 lần nếu lỗi quota)
         if batch_requests:
-            worksheet.batch_update(batch_requests)
-            log(f"Batch update {len(batch_requests)//2} tin cũ trang {page}")
+            for attempt in range(3):
+                try:
+                    worksheet.batch_update(batch_requests)
+                    log(f"Batch update {len(batch_requests)//2} tin cũ trang {page} thành công")
+                    break
+                except gspread.exceptions.APIError as e:
+                    if '429' in str(e) or 'Quota' in str(e):
+                        log(f"Quota exceeded, retry {attempt+1}/3 sau 10s...")
+                        time.sleep(10)
+                    else:
+                        log(f"Lỗi batch update: {e}")
+                        break
         if not new_rows and not batch_requests:
             consecutive_empty += 1
         else:
