@@ -20,7 +20,8 @@ RANGE_NAME = f'{SHEET_NAME}!A:E'
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')           # Chat chính (sinh nhật + mùng 1/rằm + dọn bàn thờ)
 TELEGRAM_CHAT_ID_SPECIAL = os.getenv('TELEGRAM_CHAT_ID_SPECIAL')  # Chat phụ (thường chỉ mùng 1/rằm)
-TELEGRAM_CHANNEL_EXTRA = "-1003599200231"                  # Channel hard-code (nếu muốn gửi thêm)
+
+TELEGRAM_CHANNEL_EXTRA = "-1003599200231"  # Channel hard-code (nếu muốn gửi thêm, hiện tại comment ở dưới)
 
 VN_TIMEZONE = pytz.timezone('Asia/Ho_Chi_Minh')
 
@@ -76,7 +77,7 @@ async def send_telegram_message(message, extra_chat_ids=None):
         else:
             chat_ids.extend(extra_chat_ids)
     
-    # Luôn thêm channel nếu muốn (bỏ comment nếu không cần)
+    # Luôn thêm channel nếu muốn (bỏ comment nếu cần)
     # chat_ids.append(TELEGRAM_CHANNEL_EXTRA)
     
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
@@ -106,7 +107,7 @@ def convert_lunar_to_solar(lunar_day, lunar_month, target_year):
         return None
 
 # ────────────────────────────────────────────────
-# Dương → Âm (dùng để check mùng 1, rằm, mùng 4, 18)
+# Dương → Âm
 # ────────────────────────────────────────────────
 def convert_solar_to_lunar(solar_date):
     try:
@@ -219,33 +220,37 @@ def check_birthdays(target_date, is_tomorrow=False):
     return birthdays
 
 # ────────────────────────────────────────────────
-# Kiểm tra mùng 1, mùng 4, rằm, 18 (trong 4 ngày tới)
+# Kiểm tra mùng 1, rằm (báo trước tối đa 3 ngày), dọn bàn thờ (chỉ hôm nay)
 # ────────────────────────────────────────────────
 async def check_special_and_cleaning_days():
     today = datetime.now(VN_TIMEZONE).date()
     messages = []
     
-    for i in range(4):  # hôm nay → ngày kia nữa
+    # ── Mùng 1 / rằm ── báo trước tối đa 3 ngày (hôm nay + mai + kia)
+    for i in range(3):  # 0,1,2 → hôm nay, mai, kia
         check_date = today + timedelta(days=i)
         lunar_day, lunar_month, _ = convert_solar_to_lunar(check_date)
         
         if lunar_day is None:
             continue
             
-        day_word = "Hôm nay" if i == 0 else "Ngày mai" if i == 1 else "Ngày kia" if i == 2 else "Ngày kia nữa"
+        day_word = "Hôm nay" if i == 0 else "Ngày mai" if i == 1 else "Ngày kia"
         
         if lunar_day in [1, 15]:
             event = "mùng 1" if lunar_day == 1 else "rằm"
             message = f"*{day_word} là {event} tháng {lunar_month} âm lịch*"
             messages.append(("special", message))
-        
-        elif lunar_day in [4, 18]:
-            base = "mùng 1" if lunar_day == 4 else "rằm"
-            message = (
-                f"*{day_word} là ngày {lunar_day} tháng {lunar_month} âm lịch*\n"
-                f"→ Nhắc **dọn bàn thờ** (sau {base} 3 ngày)"
-            )
-            messages.append(("cleaning", message))
+    
+    # ── Dọn bàn thờ ── CHỈ HÔM NAY (ngày 4 hoặc 18)
+    lunar_day_today, lunar_month_today, _ = convert_solar_to_lunar(today)
+    
+    if lunar_day_today in [4, 18]:
+        base = "mùng 1" if lunar_day_today == 4 else "rằm"
+        message = (
+            f"**Hôm nay {today.strftime('%d/%m/%Y')} là ngày {lunar_day_today} tháng {lunar_month_today} âm lịch**\n"
+            f"→ Nhắc **dọn bàn thờ** (sau {base} 3 ngày)"
+        )
+        messages.append(("cleaning", message))
     
     return messages
 
@@ -278,7 +283,7 @@ async def main():
             # mùng 1 & rằm ─ gửi cả chat chính + chat phụ
             await send_telegram_message(msg, extra_chat_ids=TELEGRAM_CHAT_ID_SPECIAL)
         else:
-            # dọn bàn thờ ─ cũng gửi tương tự (bạn có thể đổi riêng nếu muốn)
+            # dọn bàn thờ ─ cũng gửi tương tự
             await send_telegram_message(msg, extra_chat_ids=TELEGRAM_CHAT_ID_SPECIAL)
     
     if not today_birthdays and not tomorrow_birthdays and not events:
