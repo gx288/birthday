@@ -18,8 +18,8 @@ SHEET_NAME = 'Trang tính1'
 RANGE_NAME = f'{SHEET_NAME}!A:E'
 
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')           # Chat chính
-TELEGRAM_CHAT_ID_SPECIAL = os.getenv('TELEGRAM_CHAT_ID_SPECIAL')  # Chat phụ
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+TELEGRAM_CHAT_ID_SPECIAL = os.getenv('TELEGRAM_CHAT_ID_SPECIAL')
 
 VN_TIMEZONE = pytz.timezone('Asia/Ho_Chi_Minh')
 
@@ -35,11 +35,11 @@ def get_sheet_data():
         sheet = service.spreadsheets()
         result = sheet.values().get(spreadsheetId=SHEET_ID, range=RANGE_NAME).execute()
         data = result.get('values', [])
-        print(f"Sheet data loaded: {len(data)} rows")
+        print(f"✅ Đã tải {len(data)} dòng từ Sheet.")
         return data
     except Exception as e:
-        print(f"Error reading Google Sheet: {e}")
-        raise
+        print(f"❌ Lỗi đọc Sheet: {e}")
+        return []
 
 # ────────────────────────────────────────────────
 # GHI Google Sheet
@@ -58,10 +58,9 @@ def update_sheet_data(values):
             valueInputOption='RAW',
             body=body
         ).execute()
-        print("Google Sheet updated successfully")
+        print("✅ Đã cập nhật ngày dương lịch vào Sheet.")
     except Exception as e:
-        print(f"Error updating Google Sheet: {e}")
-        raise
+        print(f"❌ Lỗi ghi Sheet: {e}")
 
 # ────────────────────────────────────────────────
 # GỬI TIN NHẮN TELEGRAM
@@ -77,190 +76,168 @@ async def send_telegram_message(message, extra_chat_ids=None):
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     
     for chat_id in set(chat_ids):
-        if not chat_id:
-            continue
+        if not chat_id: continue
         try:
             await bot.send_message(chat_id=chat_id, text=message, parse_mode=ParseMode.MARKDOWN)
-            print(f"Sent to {chat_id}: {message[:60]}...")
-        except BadRequest as e:
-            print(f"Markdown error for {chat_id}, retrying plain: {e}")
-            await bot.send_message(chat_id=chat_id, text=message)
+            print(f"➡️ Gửi đến {chat_id} thành công.")
         except Exception as e:
-            print(f"Error sending to {chat_id}: {e}")
+            print(f"⚠️ Lỗi gửi Telegram ({chat_id}): {e}")
+            # Thử gửi lại không dùng Markdown nếu lỗi format
+            try:
+                await bot.send_message(chat_id=chat_id, text=message)
+            except: pass
 
 # ────────────────────────────────────────────────
-# Âm → Dương
+# CHUYỂN ĐỔI LỊCH
 # ────────────────────────────────────────────────
-def convert_lunar_to_solar(lunar_day, lunar_month, target_year, is_leap=False):
+def convert_lunar_to_solar(l_day, l_month, target_year, is_leap=False):
     try:
-        lunar = Lunar(target_year, lunar_month, lunar_day, isleap=is_leap)
+        lunar = Lunar(target_year, l_month, l_day, isleap=is_leap)
         solar = Converter.Lunar2Solar(lunar)
         return datetime(solar.year, solar.month, solar.day)
-    except ValueError as e:
-        print(f"Error converting lunar {lunar_day}/{lunar_month}/{target_year} (leap={is_leap}): {e}")
-        return None
+    except: return None
 
-# ────────────────────────────────────────────────
-# Dương → Âm
-# ────────────────────────────────────────────────
 def convert_solar_to_lunar(solar_date):
     try:
         solar = Solar(solar_date.year, solar_date.month, solar_date.day)
         lunar = Converter.Solar2Lunar(solar)
         return lunar.day, lunar.month, lunar.isleap
-    except Exception as e:
-        print(f"Error converting solar {solar_date} to lunar: {e}")
-        return None, None, None
+    except: return None, None, None
 
 # ────────────────────────────────────────────────
-# Cập nhật cột D,E (dương lịch từ âm lịch) - vẫn giữ để tham khảo
-# ────────────────────────────────────────────────
-def update_lunar_solar_dates():
-    now = datetime.now(VN_TIMEZONE)
-    current_year = now.year
-    previous_year = current_year - 1
-    data = get_sheet_data()
-    updated_data = [row[:] for row in data]  # deep copy
-    updated = False
-
-    for i, row in enumerate(data[1:], start=1):
-        if len(row) <= 2 or not row[2].strip():
-            continue
-        lunar_str = row[2].strip()
-        try:
-            parts = lunar_str.split('/')
-            lunar_day = int(parts[0])
-            lunar_month = int(parts[1])
-            is_leap = False
-            if len(parts) > 2 and 'nhuận' in parts[2].lower():
-                is_leap = True
-
-            # Năm trước
-            solar_prev = convert_lunar_to_solar(lunar_day, lunar_month, previous_year, is_leap)
-            # Năm nay
-            solar_curr = convert_lunar_to_solar(lunar_day, lunar_month, current_year, is_leap)
-
-            while len(updated_data[i]) < 5:
-                updated_data[i].append('')
-
-            prev_str = solar_prev.strftime('%d/%m/%Y') if solar_prev else ''
-            curr_str = solar_curr.strftime('%d/%m/%Y') if solar_curr else ''
-
-            if updated_data[i][3] != prev_str or updated_data[i][4] != curr_str:
-                updated_data[i][3] = prev_str
-                updated_data[i][4] = curr_str
-                updated = True
-        except Exception:
-            continue
-
-    if updated:
-        update_sheet_data(updated_data)
-    else:
-        print("No updates needed for lunar dates")
-
-# ────────────────────────────────────────────────
-# Kiểm tra sinh nhật hôm nay / mai (sửa: so sánh âm lịch trực tiếp)
+# KIỂM TRA SINH NHẬT
 # ────────────────────────────────────────────────
 def check_birthdays(target_date, is_tomorrow=False):
-    lunar_day, lunar_month, is_leap = convert_solar_to_lunar(target_date)
-    if lunar_day is None:
-        return []
+    l_day, l_month, is_leap = convert_solar_to_lunar(target_date)
+    if l_day is None: return []
 
-    # Chuẩn hóa dạng "ngày/tháng" (ví dụ: "22/12")
-    target_lunar = f"{lunar_day}/{lunar_month}"
-
+    print(f"🔍 Kiểm tra SN cho ngày âm: {l_day}/{l_month} (Nhuận: {is_leap})")
+    
     data = get_sheet_data()
+    if not data: return []
+    
     birthdays = []
-
     for row in data[1:]:
-        if len(row) < 3 or not row[2].strip():
-            continue
+        if len(row) < 3 or not row[2].strip(): continue
+        
         name = row[0].strip()
-        lunar_in_sheet = row[2].strip()  # ví dụ: "22/12" hoặc "15/8 nhuận"
-
-        # Xử lý tháng nhuận nếu sheet ghi "ngày/tháng nhuận"
-        is_leap_sheet = False
-        if 'nhuận' in lunar_in_sheet.lower():
-            is_leap_sheet = True
-            lunar_in_sheet = lunar_in_sheet.split('nhuận')[0].strip()
-
-        if lunar_in_sheet == target_lunar and is_leap_sheet == is_leap:
-            leap_text = " (nhuận)" if is_leap else ""
-            solar_str = target_date.strftime('%d/%m/%Y')
-            msg = (
-                f"**{name} sinh nhật {'ngày mai' if is_tomorrow else 'hôm nay'}:**\n"
-                f"Theo ngày âm: {lunar_in_sheet}{leap_text} - {solar_str} dương lịch"
-            )
-            birthdays.append((msg, name))
-
+        raw_lunar_sheet = row[2].strip().lower()
+        
+        # Xử lý Logic tháng nhuận
+        is_leap_sheet = "nhuận" in raw_lunar_sheet
+        clean_date_str = raw_lunar_sheet.replace("nhuận", "").strip()
+        
+        try:
+            # Chuyển "05/01" thành [5, 1] để so sánh số nguyên
+            parts = clean_date_str.split('/')
+            d_sheet = int(parts[0])
+            m_sheet = int(parts[1])
+            
+            if d_sheet == l_day and m_sheet == l_month and is_leap_sheet == is_leap:
+                solar_str = target_date.strftime('%d/%m/%Y')
+                status = "ngày mai" if is_tomorrow else "hôm nay"
+                msg = (
+                    f"🎂 **SINH NHẬT {status.upper()}**\n"
+                    f"👤 Họ tên: **{name}**\n"
+                    f"📅 Âm lịch: {d_sheet}/{m_sheet}{' (nhuận)' if is_leap else ''}\n"
+                    f"☀️ Dương lịch: {solar_str}"
+                )
+                birthdays.append(msg)
+        except: continue
+        
     return birthdays
 
 # ────────────────────────────────────────────────
-# Kiểm tra mùng 1, rằm + dọn bàn thờ
+# KIỂM TRA NGÀY LỄ / DỌN DẸP
 # ────────────────────────────────────────────────
-async def check_special_and_cleaning_days():
-    today = datetime.now(VN_TIMEZONE).date()
+async def check_special_days():
+    today = datetime.now(VN_TIMEZONE)
     messages = []
-
-    # Mùng 1 / rằm ─ báo trước tối đa 3 ngày
+    
+    # Check 3 ngày tới cho Mùng 1 / Rằm
     for i in range(3):
         check_date = today + timedelta(days=i)
-        lunar_day, lunar_month, _ = convert_solar_to_lunar(check_date)
-        if lunar_day is None:
-            continue
+        l_day, l_month, _ = convert_solar_to_lunar(check_date)
+        if not l_day: continue
+        
+        prefix = "Hôm nay" if i == 0 else "Ngày mai" if i == 1 else "Ngày kia"
+        
+        if l_day == 1:
+            messages.append(("special", f"🌟 *{prefix} là Mùng 1 tháng {l_month}*"))
+        elif l_day == 15:
+            messages.append(("special", f"🌕 *{prefix} là ngày Rằm tháng {l_month}*"))
 
-        day_word = "Hôm nay" if i == 0 else "Ngày mai" if i == 1 else "Ngày kia"
-
-        if lunar_day in [1, 15]:
-            event = "mùng 1" if lunar_day == 1 else "rằm"
-            msg = f"*{day_word} là {event} tháng {lunar_month} âm lịch*"
-            messages.append(("special", msg))
-
-    # Dọn bàn thờ ─ chỉ hôm nay (ngày 4 hoặc 18 âm)
-    lunar_day_today, lunar_month_today, _ = convert_solar_to_lunar(today)
-    if lunar_day_today in [4, 18]:
-        base = "mùng 1" if lunar_day_today == 4 else "rằm"
+    # Check dọn bàn thờ (Ngày 4 hoặc 18 âm lịch)
+    l_day_now, l_month_now, _ = convert_solar_to_lunar(today)
+    if l_day_now in [4, 18]:
+        origin = "Mùng 1" if l_day_now == 4 else "Rằm"
         msg = (
-            f"**Hôm nay {today.strftime('%d/%m/%Y')} là ngày {lunar_day_today} tháng {lunar_month_today} âm lịch**\n"
-            f"→ Nhắc **dọn bàn thờ** (sau {base} 3 ngày)"
+            f"🧹 **NHẮC DỌN BÀN THỜ**\n"
+            f"Hôm nay là {l_day_now}/{l_month_now} âm lịch (3 ngày sau {origin})."
         )
         messages.append(("cleaning", msg))
-
+        
     return messages
 
 # ────────────────────────────────────────────────
-# HÀM CHÍNH
+# CẬP NHẬT CỘT D & E (DƯƠNG LỊCH)
+# ────────────────────────────────────────────────
+def sync_solar_columns():
+    now = datetime.now(VN_TIMEZONE)
+    data = get_sheet_data()
+    if not data: return
+    
+    updated_data = [row[:] for row in data]
+    changed = False
+    
+    for i, row in enumerate(data[1:], start=1):
+        if len(row) < 3 or not row[2].strip(): continue
+        try:
+            raw = row[2].strip().lower()
+            is_leap = "nhuận" in raw
+            parts = raw.replace("nhuận", "").strip().split('/')
+            d, m = int(parts[0]), int(parts[1])
+            
+            solar_prev = convert_lunar_to_solar(d, m, now.year - 1, is_leap)
+            solar_curr = convert_lunar_to_solar(d, m, now.year, is_leap)
+            
+            while len(updated_data[i]) < 5: updated_data[i].append("")
+            
+            s_prev_str = solar_prev.strftime('%d/%m/%Y') if solar_prev else ""
+            s_curr_str = solar_curr.strftime('%d/%m/%Y') if solar_curr else ""
+            
+            if updated_data[i][3] != s_prev_str or updated_data[i][4] != s_curr_str:
+                updated_data[i][3] = s_prev_str
+                updated_data[i][4] = s_curr_str
+                changed = True
+        except: continue
+        
+    if changed: update_sheet_data(updated_data)
+
+# ────────────────────────────────────────────────
+# MAIN
 # ────────────────────────────────────────────────
 async def main():
-    now = datetime.now(VN_TIMEZONE)
-    print(f"Script started at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-
-    # Cập nhật ngày dương từ âm (tham khảo)
-    update_lunar_solar_dates()
-
-    today = now
+    print(f"--- Script khởi chạy lúc: {datetime.now(VN_TIMEZONE)} ---")
+    
+    # 1. Đồng bộ dữ liệu ngày tháng lên Sheet
+    sync_solar_columns()
+    
+    # 2. Kiểm tra sinh nhật
+    today = datetime.now(VN_TIMEZONE)
     tomorrow = today + timedelta(days=1)
+    
+    all_bday_msgs = check_birthdays(today, False) + check_birthdays(tomorrow, True)
+    for m in all_bday_msgs:
+        await send_telegram_message(m)
+        
+    # 3. Kiểm tra ngày đặc biệt
+    special_events = await check_special_days()
+    for e_type, msg in special_events:
+        # Gửi cả chat chính và chat phụ cho chắc chắn
+        await send_telegram_message(msg, extra_chat_ids=TELEGRAM_CHAT_ID_SPECIAL)
 
-    # Sinh nhật
-    today_birthdays = check_birthdays(today, is_tomorrow=False)
-    tomorrow_birthdays = check_birthdays(tomorrow, is_tomorrow=True)
-
-    for msg, _ in today_birthdays:
-        await send_telegram_message(msg)
-    for msg, _ in tomorrow_birthdays:
-        await send_telegram_message(msg)
-
-    # Mùng 1/rằm + dọn bàn thờ
-    events = await check_special_and_cleaning_days()
-
-    for event_type, msg in events:
-        if event_type == "special":
-            await send_telegram_message(msg, extra_chat_ids=TELEGRAM_CHAT_ID_SPECIAL)
-        else:
-            await send_telegram_message(msg, extra_chat_ids=TELEGRAM_CHAT_ID_SPECIAL)
-
-    if not today_birthdays and not tomorrow_birthdays and not events:
-        print("Không có sự kiện nào trong vài ngày tới.")
+    print("--- Hoàn thành chu kỳ kiểm tra ---")
 
 if __name__ == '__main__':
     asyncio.run(main())
