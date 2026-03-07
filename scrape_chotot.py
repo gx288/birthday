@@ -83,7 +83,6 @@ def connect_google_sheet():
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=SHEET_NAME, rows=2000, cols=len(HEADERS))
         ws.append_row(HEADERS)
-    # Đảm bảo header đúng
     if ws.row_values(1) != HEADERS:
         ws.update("A1", [HEADERS])
     return ws
@@ -107,7 +106,7 @@ def get_images_from_detail(link):
                         images.extend([i for i in img if "cdn.chotot.com" in i])
             except:
                 pass
-        return list(set(images))[:6]  # max 6 ảnh
+        return list(set(images))[:6]
     except Exception as e:
         log(f"Lỗi lấy ảnh: {e}")
         return []
@@ -136,58 +135,39 @@ def send_telegram_album(item, images):
 
 def extract_item_data(item_el):
     try:
-        # Link (giữ nguyên, ổn)
+        # Link
         link_el = item_el.find_element(By.TAG_NAME, "a")
         link = link_el.get_attribute("href")
         if not link.startswith("http"):
             link = BASE_URL + link
 
-        # TITLE - XPath mới, thử nhiều khả năng phổ biến trên Chợ Tốt
+        # TITLE - fallback mạnh
         title = "Không tiêu đề"
-        title_candidates = [
-            './/h3',                          # Thường nhất
-            './/h3[contains(@class,"title") or contains(@class,"name") or contains(@class,"AdTitle") or contains(@class,"Text")]',  
-            './/span[contains(@class,"title") or contains(@class,"name") or contains(@class,"AdTitle")]',  
-            './/div[contains(@class,"title") or contains(@class,"name") or @class="AdCard_title"]',  
-            './/h2',                          # fallback
-            './/*[contains(@class,"title")]'  # rộng nhất nếu cần
-        ]
-        for xp in title_candidates:
+        try:
+            title_el = item_el.find_element(By.XPATH, './/h3 | .//h3[contains(@class,"title") or contains(@class,"name")] | .//span[strong] | .//div[contains(@class,"title")]')
+            title = title_el.text.strip()
+        except:
             try:
-                title_el = item_el.find_element(By.XPATH, xp)
-                title_text = title_el.text.strip()
-                if title_text and len(title_text) > 5:  # tránh text rác
-                    title = title_text
-                    break
-            except:
-                continue
-
-        if title == "Không tiêu đề":
-            # Fallback: lấy text từ a tag hoặc card
-            try:
-                title = item_el.find_element(By.TAG_NAME, "a").text.strip()
-                if not title:
-                    title = item_el.text.split('\n')[0].strip()  # dòng đầu thường là title
+                title = link_el.text.strip().split('\n')[0].strip()
+                if len(title) < 5:
+                    title = item_el.text.strip().split('\n')[0].strip()
             except:
                 pass
+        if not title or len(title) < 5:
+            title = "Không tiêu đề"
 
-        # PRICE - cải thiện (tìm text chứa ₫, triệu, đ, thỏa thuận...)
+        # PRICE
         price = "Thỏa thuận"
-        price_xp = './/span | .//div | .//p | .//strong[contains(text(),"₫") or contains(text(),"triệu") or contains(text(),"đ") or contains(text(),"Thỏa thuận")]'
         try:
-            price_els = item_el.find_elements(By.XPATH, price_xp)
-            for el in price_els:
-                txt = el.text.strip()
-                if any(k in txt for k in ['₫', 'triệu', 'đ', 'Thỏa thuận', 'tỷ']):
-                    price = txt
-                    break
+            price_el = item_el.find_element(By.XPATH, './/span[contains(text(),"₫") or contains(text(),"triệu") or contains(text(),"đ") or contains(text(),"Thỏa thuận")]')
+            price = price_el.text.strip()
         except:
             pass
 
-        # TIME POSTED
+        # TIME
         time_posted = "N/A"
         try:
-            time_el = item_el.find_element(By.XPATH, './/span[contains(text(),"trước") or contains(text(),"ngày") or contains(text(),"giờ") or contains(text(),"tháng") or contains(text(),"phút")]')
+            time_el = item_el.find_element(By.XPATH, './/span[contains(text(),"trước") or contains(text(),"ngày") or contains(text(),"giờ") or contains(text(),"tháng")]')
             time_posted = time_el.text.strip()
         except:
             pass
@@ -195,7 +175,7 @@ def extract_item_data(item_el):
         # LOCATION
         location = "Hà Nội"
         try:
-            loc_el = item_el.find_element(By.XPATH, './/span[contains(text(),"Quận") or contains(text(),"Huyện") or contains(text(),"TP.") or contains(@class,"location")]')
+            loc_el = item_el.find_element(By.XPATH, './/span[contains(text(),"Quận") or contains(text(),"Huyện") or contains(@class,"location")]')
             location = loc_el.text.strip()
         except:
             pass
@@ -203,15 +183,15 @@ def extract_item_data(item_el):
         # SELLER
         seller = "Ẩn danh"
         try:
-            seller_el = item_el.find_element(By.XPATH, './/span[contains(@class,"seller") or contains(@class,"name") or contains(@class,"user") or contains(text(),"•")]')
-            seller = seller_el.text.strip().split('•')[0].strip() if '•' in seller_el.text else seller_el.text.strip()
+            seller_el = item_el.find_element(By.XPATH, './/span[contains(@class,"seller") or contains(@class,"name") or contains(text(),"•")]')
+            seller = seller_el.text.strip().split('•')[0].strip()
         except:
             pass
 
         # VIEWS
         views = 0
         try:
-            views_text = item_el.find_element(By.XPATH, './/span[contains(text(),"lượt xem") or contains(text(),"view")]').text
+            views_text = item_el.find_element(By.XPATH, './/span[contains(text(),"lượt xem")]').text
             views = int(''.join(c for c in views_text if c.isdigit()))
         except:
             pass
@@ -233,7 +213,6 @@ def scrape():
     log("🚀 BẮT ĐẦU QUÉT CHỢ TỐT Nhạc cụ HN ≤ 2.1tr")
     ws = connect_google_sheet()
 
-    # Đọc tin cũ (đơn giản hóa, bạn có thể mở rộng)
     try:
         data_old = ws.get_all_values()[1:]
         existing_links = {row[3] for row in data_old if len(row) > 3 and row[3].strip()}
@@ -253,9 +232,26 @@ def scrape():
         WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         scroll_to_bottom(driver)
 
-        # Tìm tất cả items (XPath linh hoạt)
-        items = driver.find_elements(By.XPATH, '//li[.//a[contains(@href, "/mua-ban-nhac-cu/")]] | //div[contains(@class,"AdItem") or contains(@class,"ListItem") or @data-testid="list-item"]')
-        log(f"Trang {page}: Tìm thấy {len(items)} tin")
+        # Tìm items - XPath tránh phần tags/SEO
+        items = driver.find_elements(By.XPATH, '//li[.//a[contains(@href, "/mua-ban-nhac-cu/") and not(contains(@href, "/tags/"))]] | //div[contains(@class,"AdItem") or contains(@class,"AdCard") or contains(@class,"ListItem") or @data-testid="list-item"]')
+
+        # Filter thêm để chắc chắn loại bỏ SEO keywords
+        filtered_items = []
+        for item in items:
+            try:
+                href = item.find_element(By.TAG_NAME, "a").get_attribute("href")
+                if '/tags/' not in href and '/mua-ban-nhac-cu/' in href:
+                    filtered_items.append(item)
+            except:
+                pass
+
+        items = filtered_items
+        log(f"Trang {page}: Tìm thấy {len(items)} tin sau filter (loại trừ tags/SEO)")
+
+        # Debug: nếu muốn xem HTML item đầu
+        # if items:
+        #     log("DEBUG HTML item đầu:")
+        #     print(items[0].get_attribute("outerHTML")[:1000])
 
         for item_el in items:
             data = extract_item_data(item_el)
@@ -263,16 +259,14 @@ def scrape():
                 continue
             link = data["link"]
             if link in existing_links:
-                continue  # skip tin cũ
+                continue
 
             images = get_images_from_detail(link)
             if images:
                 send_telegram_album(data, images)
             else:
-                # Nếu không có ảnh, gửi text thôi (tùy bạn)
-                pass
+                log(f"Tin mới không ảnh: {data['title']}")
 
-            # Thêm vào sheet (bạn có thể batch update sau)
             stt = len(existing_links) + new_count + 1
             row = [stt, data["title"], data["price"], link, data["time"], data["location"], data["seller"], data["views"], ""]
             ws.append_row(row)
@@ -280,7 +274,7 @@ def scrape():
             new_count += 1
             log(f"TIN MỚI → {data['title']} | {data['price']}")
 
-        if len(items) < 5:  # Có thể hết trang
+        if len(items) < 5:
             log("Có vẻ hết tin → dừng.")
             break
 
