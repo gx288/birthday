@@ -136,45 +136,83 @@ def send_telegram_album(item, images):
 
 def extract_item_data(item_el):
     try:
+        # Link (giữ nguyên, ổn)
         link_el = item_el.find_element(By.TAG_NAME, "a")
         link = link_el.get_attribute("href")
         if not link.startswith("http"):
             link = BASE_URL + link
 
-        title = item_el.find_element(By.XPATH, './/h3 | .//h2 | .//div[contains(@class,"title")]').text.strip() or "Không tiêu đề"
+        # TITLE - XPath mới, thử nhiều khả năng phổ biến trên Chợ Tốt
+        title = "Không tiêu đề"
+        title_candidates = [
+            './/h3',                          # Thường nhất
+            './/h3[contains(@class,"title") or contains(@class,"name") or contains(@class,"AdTitle") or contains(@class,"Text")]',  
+            './/span[contains(@class,"title") or contains(@class,"name") or contains(@class,"AdTitle")]',  
+            './/div[contains(@class,"title") or contains(@class,"name") or @class="AdCard_title"]',  
+            './/h2',                          # fallback
+            './/*[contains(@class,"title")]'  # rộng nhất nếu cần
+        ]
+        for xp in title_candidates:
+            try:
+                title_el = item_el.find_element(By.XPATH, xp)
+                title_text = title_el.text.strip()
+                if title_text and len(title_text) > 5:  # tránh text rác
+                    title = title_text
+                    break
+            except:
+                continue
 
+        if title == "Không tiêu đề":
+            # Fallback: lấy text từ a tag hoặc card
+            try:
+                title = item_el.find_element(By.TAG_NAME, "a").text.strip()
+                if not title:
+                    title = item_el.text.split('\n')[0].strip()  # dòng đầu thường là title
+            except:
+                pass
+
+        # PRICE - cải thiện (tìm text chứa ₫, triệu, đ, thỏa thuận...)
         price = "Thỏa thuận"
+        price_xp = './/span | .//div | .//p | .//strong[contains(text(),"₫") or contains(text(),"triệu") or contains(text(),"đ") or contains(text(),"Thỏa thuận")]'
         try:
-            price_el = item_el.find_element(By.XPATH, './/span[contains(text(),"₫") or contains(text(),"triệu") or contains(text(),"đ")]')
-            price = price_el.text.strip()
+            price_els = item_el.find_elements(By.XPATH, price_xp)
+            for el in price_els:
+                txt = el.text.strip()
+                if any(k in txt for k in ['₫', 'triệu', 'đ', 'Thỏa thuận', 'tỷ']):
+                    price = txt
+                    break
         except:
             pass
 
+        # TIME POSTED
         time_posted = "N/A"
         try:
-            time_el = item_el.find_element(By.XPATH, './/span[contains(text(),"trước") or contains(text(),"ngày") or contains(text(),"tháng")]')
+            time_el = item_el.find_element(By.XPATH, './/span[contains(text(),"trước") or contains(text(),"ngày") or contains(text(),"giờ") or contains(text(),"tháng") or contains(text(),"phút")]')
             time_posted = time_el.text.strip()
         except:
             pass
 
+        # LOCATION
         location = "Hà Nội"
         try:
-            loc_el = item_el.find_element(By.XPATH, './/span[contains(@class,"location") or text()[contains(.,"Quận") or contains(.,"Huyện")]]')
+            loc_el = item_el.find_element(By.XPATH, './/span[contains(text(),"Quận") or contains(text(),"Huyện") or contains(text(),"TP.") or contains(@class,"location")]')
             location = loc_el.text.strip()
         except:
             pass
 
+        # SELLER
         seller = "Ẩn danh"
         try:
-            seller_el = item_el.find_element(By.XPATH, './/span[contains(@class,"seller") or contains(@class,"name")]')
-            seller = seller_el.text.strip()
+            seller_el = item_el.find_element(By.XPATH, './/span[contains(@class,"seller") or contains(@class,"name") or contains(@class,"user") or contains(text(),"•")]')
+            seller = seller_el.text.strip().split('•')[0].strip() if '•' in seller_el.text else seller_el.text.strip()
         except:
             pass
 
+        # VIEWS
         views = 0
         try:
-            views_text = item_el.find_element(By.XPATH, './/span[contains(text(),"lượt xem")]').text
-            views = int(''.join(filter(str.isdigit, views_text)))
+            views_text = item_el.find_element(By.XPATH, './/span[contains(text(),"lượt xem") or contains(text(),"view")]').text
+            views = int(''.join(c for c in views_text if c.isdigit()))
         except:
             pass
 
