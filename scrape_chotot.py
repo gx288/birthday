@@ -12,15 +12,14 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from datetime import datetime
 from bs4 import BeautifulSoup
-import re
 
-# CẤU HÌNH
+# CẤU HÌNH - Giữ nguyên như cũ
 BASE_URL = "https://www.chotot.com"
 START_URL = "https://www.chotot.com/mua-ban-nhac-cu-ha-noi?price=0-2100000&f=p&limit=20"
 SHEET_ID = "14tqKftTqlesnb0NqJZU-_f1EsWWywYqO36NiuDdmaTo"
 SHEET_NAME = "Chợ tốt"
 MAX_PAGES = 12
-SLEEP_BETWEEN_PAGES = random.uniform(8, 15)
+SLEEP_BETWEEN_PAGES = random.uniform(6, 12)
 
 HEADERS = ["STT", "Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Hidden"]
 
@@ -41,27 +40,32 @@ def setup_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument(f"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument(f"user-agent={random.choice(['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36'])}")
     driver = webdriver.Chrome(options=options)
     return driver
 
 def scroll_to_bottom(driver):
-    log("Scroll xuống cuối...")
+    log("🔄 Scroll xuống cuối...")
     last_height = driver.execute_script("return document.body.scrollHeight")
-    for _ in range(12):
+    attempts = 0
+    while attempts < 12:
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(random.uniform(3, 5))
+        time.sleep(random.uniform(2.5, 4))
         new_height = driver.execute_script("return document.body.scrollHeight")
         if new_height == last_height:
             break
         last_height = new_height
-    time.sleep(3)
+        attempts += 1
+    time.sleep(2)
     log("Hoàn tất scroll.")
 
 def connect_google_sheet():
     log("Kết nối Google Sheets...")
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+    if not creds_json:
+        raise ValueError("Thiếu GOOGLE_CREDENTIALS")
     creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(creds_json), scope)
     client = gspread.authorize(creds)
     sh = client.open_by_key(SHEET_ID)
@@ -76,12 +80,13 @@ def connect_google_sheet():
 
 def get_images_from_detail(link):
     try:
-        r = requests.get(link, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(link, headers=headers, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
         images = []
-        for s in soup.find_all("script", type="application/ld+json"):
+        for script in soup.find_all("script", type="application/ld+json"):
             try:
-                data = json.loads(s.string)
+                data = json.loads(script.string)
                 if "image" in data:
                     img = data["image"]
                     if isinstance(img, str) and "cdn.chotot.com" in img:
@@ -97,86 +102,102 @@ def get_images_from_detail(link):
 def send_telegram_album(item, images):
     cfg = get_telegram_config()
     if not cfg["token"] or not cfg["chat_id"] or not images:
+        log("Skip Tele: thiếu token/chat_id hoặc không có ảnh")
         return
-    caption = f"<b>{item['title']}</b>\n{item['price']}\n{item['location']}\n{item['link']}"
-    media = [{"type": "photo", "media": url, "caption": caption if i == 0 else "", "parse_mode": "HTML"} for i, url in enumerate(images)]
+    caption = f"🎸 <b>HÀNG MỚI - CHỢ TỐT</b>\n\n<b>{item['title']}</b>\n💰 <b>{item['price']}</b>\n📍 {item['location']}\n⏰ {item['time']}\n🔗 {item['link']}"
+    media = []
+    for idx, url in enumerate(images):
+        media.append({
+            "type": "photo",
+            "media": url,
+            "caption": caption if idx == 0 else "",
+            "parse_mode": "HTML"
+        })
     try:
         requests.post(f"https://api.telegram.org/bot{cfg['token']}/sendMediaGroup", json={"chat_id": cfg["chat_id"], "media": media})
-        log(f"Đã gửi album cho tin mới: {item['title']}")
+        log(f"Đã gửi album ảnh cho tin mới: {item['title']}")
     except Exception as e:
-        log(f"Lỗi gửi: {e}")
+        log(f"Lỗi gửi album Tele: {e}")
 
 def extract_from_card(card_el):
     try:
         text = card_el.text.strip()
-        if not text or len(text) < 20:
+        if len(text) < 30 or "Quy chế hoạt động" in text or "Giải quyết tranh chấp" in text or "Chợ Tốt" in text[:20]:
             return None
 
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
-
-        # Title: dòng đầu hoặc dòng có từ "Đàn", "Organ", "Guitar"...
-        title = lines[0] if lines else "Không tiêu đề"
-        if "đ" in title or "trước" in title:
-            title = lines[1] if len(lines) > 1 else title
-
-        # Price: dòng chứa ₫, triệu, đ, Thỏa thuận
-        price = "Thỏa thuận"
-        for line in lines:
-            if any(k in line for k in ['₫', 'triệu', 'đ', 'Thỏa thuận']):
-                price = line
-                break
-
-        # Link: tìm a trong card
-        link = ""
-        try:
-            a = card_el.find_element(By.TAG_NAME, "a")
-            link = a.get_attribute("href")
-            if not link.startswith("http"):
-                link = BASE_URL + link
-        except:
-            pass
-
-        if not link or '/tags/' in link:
-            return None
-
-        # Location: dòng chứa Quận, Huyện
-        location = "Hà Nội"
-        for line in lines:
-            if any(k in line for k in ['Quận', 'Huyện', '(P.', 'TP.']):
-                location = line
-                break
-
-        # Time: dòng chứa trước, ngày, giờ, hôm qua
-        time_posted = "N/A"
-        for line in lines:
-            if any(k in line for k in ['trước', 'ngày', 'giờ', 'hôm qua', 'tháng']):
-                time_posted = line
-                break
-
-        return {
-            "title": title,
-            "price": price,
-            "link": link,
-            "time": time_posted,
-            "location": location,
+        data = {
+            "title": "Không tiêu đề",
+            "price": "Thỏa thuận",
+            "link": "",
+            "time": "N/A",
+            "location": "Hà Nội",
             "seller": "Ẩn danh",
             "views": 0
         }
+
+        # Link & Title từ a
+        try:
+            a = card_el.find_element(By.TAG_NAME, "a")
+            data["link"] = a.get_attribute("href")
+            if not data["link"].startswith("http"):
+                data["link"] = BASE_URL + data["link"]
+            if '/tags/' in data["link"] or not data["link"].endswith('.htm'):
+                return None
+            data["title"] = a.text.strip() or card_el.find_element(By.CSS_SELECTOR, 'h3, h4, strong, [class*="title"]').text.strip()
+        except:
+            pass
+
+        # Price
+        try:
+            price_el = card_el.find_element(By.XPATH, ".//span[contains(., '₫') or contains(., 'triệu') or contains(., 'đ') or contains(., 'Thỏa thuận')]")
+            data["price"] = price_el.text.strip()
+        except:
+            pass
+
+        # Time
+        try:
+            time_el = card_el.find_element(By.XPATH, ".//span[contains(., 'trước') or contains(., 'ngày') or contains(., 'giờ') or contains(., 'hôm qua') or contains(., 'tháng')]")
+            data["time"] = time_el.text.strip()
+        except:
+            pass
+
+        # Location
+        try:
+            loc_el = card_el.find_element(By.XPATH, ".//span[contains(., 'Quận') or contains(., 'Huyện') or contains(., '(P.') or contains(., 'TP.')]")
+            data["location"] = loc_el.text.strip()
+        except:
+            pass
+
+        # Seller & Views (nếu có)
+        try:
+            seller_el = card_el.find_element(By.XPATH, ".//span[contains(@class, 'seller') or contains(., 'đã bán') or contains(., 'lượt xem')]")
+            seller_text = seller_el.text.strip()
+            if 'đã bán' in seller_text or 'lượt xem' in seller_text:
+                data["seller"] = seller_text
+            else:
+                data["seller"] = seller_text.split('•')[0].strip() if '•' in seller_text else seller_text
+        except:
+            pass
+
+        if data["title"] == "Không tiêu đề" or not data["link"]:
+            return None
+
+        return data
     except Exception as e:
         log(f"Lỗi extract card: {e}")
         return None
 
 def scrape():
-    log("🚀 BẮT ĐẦU QUÉT CHỢ TỐT Nhạc cụ HN ≤ 2.1tr")
+    log("🚀 BẮT ĐẦU QUÉT CHỢ TỐT - Nhạc cụ Hà Nội ≤ 2.1tr")
     ws = connect_google_sheet()
 
     existing_links = set()
     try:
         data_old = ws.get_all_values()[1:]
         existing_links = {row[3].strip() for row in data_old if len(row) > 3 and row[3].strip()}
-        log(f"Đọc {len(existing_links)} link cũ")
+        log(f"Đọc {len(existing_links)} link cũ từ sheet")
     except:
-        pass
+        log("Không đọc được sheet cũ")
 
     driver = setup_driver()
     new_count = 0
@@ -186,27 +207,26 @@ def scrape():
         url = START_URL if page == 1 else f"{START_URL}&page={page}"
         log(f"Trang {page} → {url}")
         driver.get(url)
-
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         scroll_to_bottom(driver)
 
-        # Fallback cards như log của bạn
+        # Tìm cards
         card_elements = driver.find_elements(By.CSS_SELECTOR, 'div[class*="AdCard"], div[class*="item"], div[class*="card"], div[class*="list-item"], li, div[data-testid*="ad"], div[class*="wrapper"]')
-        log(f"Fallback cards: {len(card_elements)}")
+        log(f"Trang {page}: Tìm thấy {len(card_elements)} cards")
 
         if len(card_elements) > 0:
-            # Debug text của card đầu
             try:
-                log("DEBUG text card đầu tiên:")
-                print(card_elements[0].text[:500])
+                log("DEBUG text card đầu (để check cấu trúc):")
+                print(card_elements[0].text[:600])
             except:
                 pass
 
         processed = 0
         for card in card_elements:
             data = extract_from_card(card)
-            if not data or not data['link'] or data['title'] == "Không tiêu đề":
+            if not data:
                 continue
+
             link = data["link"]
             if link in existing_links:
                 continue
@@ -214,19 +234,31 @@ def scrape():
             images = get_images_from_detail(link)
             if images:
                 send_telegram_album(data, images)
+            else:
+                log(f"Tin mới không ảnh: {data['title']} - skip Tele")
 
             stt = len(existing_links) + new_count + 1
-            row = [stt, data["title"], data["price"], link, data["time"], data["location"], data["seller"], data["views"], ""]
+            row = [
+                str(stt),
+                data["title"],
+                data["price"],
+                link,
+                data["time"],
+                data["location"],
+                data["seller"],
+                str(data["views"]),
+                ""
+            ]
             ws.append_row(row)
             existing_links.add(link)
             new_count += 1
             processed += 1
-            log(f"TIN MỚI → {data['title']} | {data['price']}")
+            log(f"TIN MỚI → {data['title']} | {data['price']} | {link}")
 
-        log(f"Trang {page}: Xử lý thành công {processed} tin")
+        log(f"Trang {page}: Xử lý thành công {processed} tin mới")
 
-        if processed == 0 and len(card_elements) == 0:
-            log("Không có tin → dừng.")
+        if processed < 3:
+            log("Có vẻ ít tin hoặc hết → dừng.")
             break
 
         page += 1
@@ -236,4 +268,7 @@ def scrape():
     log(f"Hoàn thành: +{new_count} tin mới")
 
 if __name__ == "__main__":
-    scrape()
+    try:
+        scrape()
+    except Exception as e:
+        log(f"Lỗi tổng: {e}")
