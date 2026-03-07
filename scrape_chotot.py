@@ -23,13 +23,12 @@ SHEET_ID = "14tqKftTqlesnb0NqJZU-_f1EsWWywYqO36NiuDdmaTo"
 SHEET_NAME = "Chợ tốt"
 MAX_PAGES = 12
 MAX_CONSECUTIVE_EMPTY = 3
-SLEEP_BETWEEN_PAGES = 4.5
+SLEEP_BETWEEN_PAGES = random.uniform(4.5, 7.5)  # random để tránh bị block
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
 ]
-
 HEADERS = ["STT", "Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Hidden"]
 
 def log(message):
@@ -60,11 +59,11 @@ def connect_google_sheet():
     creds_json_str = os.environ.get("GOOGLE_CREDENTIALS")
     if not creds_json_str:
         raise ValueError("Không tìm thấy GOOGLE_CREDENTIALS")
-    
+   
     creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(creds_json_str), scope)
     client = gspread.authorize(creds)
     sh = client.open_by_key(SHEET_ID)
-    
+   
     try:
         worksheet = sh.worksheet(SHEET_NAME)
         log(f"Tìm thấy sheet: {SHEET_NAME}")
@@ -72,8 +71,7 @@ def connect_google_sheet():
         worksheet = sh.add_worksheet(title=SHEET_NAME, rows=2000, cols=10)
         worksheet.append_row(HEADERS)
         log("Tạo sheet & header mới")
-    
-    # Đảm bảo header đúng và đủ cột
+   
     current_headers = worksheet.row_values(1)
     if current_headers != HEADERS:
         worksheet.update("A1:I1", [HEADERS])
@@ -89,7 +87,7 @@ def get_images_from_detail(link):
         if resp.status_code != 200:
             log(f"Detail {link} status {resp.status_code}")
             return []
-        
+       
         soup = BeautifulSoup(resp.text, "html.parser")
         images = set()
         # JSON-LD
@@ -123,7 +121,7 @@ def send_telegram_with_media(item, images):
     cfg = get_telegram_config()
     if not cfg["token"] or not cfg["chat_id"]:
         return
-    
+   
     caption = (
         f"🎸 <b>HÀNG MỚI - CHỢ TỐT</b>\n\n"
         f"<b>{item['title']}</b>\n"
@@ -157,7 +155,7 @@ def send_telegram_alert(item):
     cfg = get_telegram_config()
     if not cfg["token"] or not cfg["chat_id"]:
         return
-    
+   
     message = (
         f"🎸 <b>HÀNG MỚI - CHỢ TỐT</b>\n\n"
         f"<b>{item['title']}</b>\n"
@@ -186,35 +184,57 @@ def extract_item_data(item_element, page):
         a = item_element.find_element(By.TAG_NAME, "a")
         link = a.get_attribute("href")
         if not link.startswith("http"):
-            link = BASE_URL + link.strip()
-        title = item_element.find_element(By.CSS_SELECTOR, "h3").text.strip() or "Không có tiêu đề"
-        
+            link = BASE_URL + link if link.startswith("/") else BASE_URL + "/" + link
+
+        # Title
+        title = "Không có tiêu đề"
+        try:
+            title_el = item_element.find_element(By.XPATH, './/h2 | .//h3')
+            title = title_el.text.strip()
+        except:
+            pass
+
+        # Price
         price = "Thỏa thuận"
         try:
-            price = item_element.find_element(By.CSS_SELECTOR, "span.bfe6oav").text.strip()
+            price_el = item_element.find_element(By.XPATH, './/span[contains(text(), "đ") or contains(@style, "240, 50, 94")]')
+            price = price_el.text.strip()
         except:
             pass
+
+        # Time Posted
         time_posted = "N/A"
         try:
-            time_posted = item_element.find_element(By.CSS_SELECTOR, "span.c1u6gyxh.tx5yyjc").text.strip()
+            time_el = item_element.find_element(By.XPATH, './/span[contains(text(), "trước") or contains(text(), "tháng") or contains(text(), "ngày") or contains(text(), "giờ")]')
+            time_posted = time_el.text.strip()
         except:
             pass
+
+        # Location
         location = "Hà Nội"
         try:
-            location = item_element.find_element(By.CSS_SELECTOR, "span.c1u6gyxh:not(.tx5yyjc)").text.strip()
+            loc_el = item_element.find_element(By.XPATH, './/svg[contains(@id, "Location") or contains(@data-type, "Location")]/following-sibling::div//span | .//span[contains(text(), "Quận") or contains(text(), "Huyện") or contains(text(), "Thành phố")]')
+            location = loc_el.text.strip()
         except:
             pass
+
+        # Seller
         seller = "Ẩn danh"
         try:
-            seller = item_element.find_element(By.CSS_SELECTOR, "div.dteznpi span.brnpcl3").text.strip()
+            seller_el = item_element.find_element(By.XPATH, './/div[contains(@class, "dteznpi")]//span | .//span[contains(@class, "brnpcl3")]')
+            seller = seller_el.text.strip()
         except:
             pass
-        views_str = "0"
+
+        # Views
+        views = 0
         try:
-            views_str = item_element.find_element(By.CSS_SELECTOR, "div.vglk6qt span").text.strip()
+            views_el = item_element.find_element(By.XPATH, './/span[contains(text(), "lượt xem") or contains(text(), "views") or contains(text(), "đã xem")]')
+            views_str = views_el.text.strip()
+            views = int(''.join(c for c in views_str if c.isdigit())) if any(c.isdigit() for c in views_str) else 0
         except:
             pass
-        views = int(''.join(c for c in views_str if c.isdigit())) if ''.join(c for c in views_str if c.isdigit()) else 0
+
         return {
             "title": title,
             "price": price,
@@ -226,30 +246,28 @@ def extract_item_data(item_element, page):
             "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "page": page
         }
-    except:
+    except Exception as e:
+        log(f"Lỗi extract item trên trang {page}: {e}")
         return None
 
 def scrape_data():
     log("🚀 BẮT ĐẦU QUÉT CHỢ TỐT - Nhạc cụ Hà Nội ≤ 2.1tr")
     worksheet = connect_google_sheet()
-    
+   
     # Đọc dữ liệu hiện tại
     try:
         all_values = worksheet.get_all_values()
         existing_data = all_values[1:] if len(all_values) > 1 else []
-        
-        # Tạo map: link → row number
+       
         link_to_row = {}
-        # Tạo set: các title đã tồn tại (để check trùng title)
         existing_titles = set()
-        # Tạo map: title → list row numbers (nếu title trùng nhiều)
         title_to_rows = {}
-        
+       
         for i, row in enumerate(existing_data, start=2):
             if len(row) >= 4:
                 link = row[3].strip() if len(row) > 3 else ""
                 title = row[1].strip() if len(row) > 1 else ""
-                
+               
                 if link:
                     link_to_row[link] = i
                 if title:
@@ -257,7 +275,7 @@ def scrape_data():
                     if title not in title_to_rows:
                         title_to_rows[title] = []
                     title_to_rows[title].append(i)
-        
+       
         existing_links = set(link_to_row.keys())
         log(f"Đọc {len(existing_links)} tin cũ | {len(existing_titles)} title khác nhau từ sheet")
     except Exception as e:
@@ -266,7 +284,7 @@ def scrape_data():
         existing_titles = set()
         link_to_row = {}
         title_to_rows = {}
-    
+   
     driver = setup_driver()
     total_new = 0
     total_updated = 0
@@ -276,14 +294,15 @@ def scrape_data():
     page_stt_logs = []
     batch_updates = []
     new_rows = []
-    
+   
     while page <= MAX_PAGES:
         url = START_URL if page == 1 else f"{START_URL}&page={page}"
         log(f"Trang {page} → {url}")
-        
+       
         try:
             driver.get(url)
-            WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, "li.a14axl8t")))
+            WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            time.sleep(2)  # chờ thêm để DOM load hoàn chỉnh
         except Exception as e:
             log(f"Load trang {page} lỗi: {e}")
             if page_has_no_results(driver):
@@ -294,26 +313,33 @@ def scrape_data():
             page += 1
             time.sleep(SLEEP_BETWEEN_PAGES)
             continue
-        
+       
         if page_has_no_results(driver):
+            log(f"Trang {page} không có kết quả")
             break
-        
-        items = driver.find_elements(By.CSS_SELECTOR, "li.a14axl8t")
-        log(f"Trang {page}: Tìm thấy {len(items)} tin")
-        page_stt_start = global_stt_counter
+       
+        # Tìm items bằng XPath ổn định
+        try:
+            items = driver.find_elements(By.XPATH, '//li[.//a[contains(@href, "/mua-ban-nhac-cu-")]]')
+            log(f"Trang {page}: Tìm thấy {len(items)} tin (dùng XPath ổn định)")
+        except Exception as e:
+            log(f"Lỗi tìm items trang {page}: {e}")
+            items = []
+       
         page_item_count = 0
-        
+        page_stt_start = global_stt_counter
+       
         for item_el in items:
             data = extract_item_data(item_el, page)
             if not data:
                 continue
-            
+           
             link = data["link"]
             title = data["title"]
             page_item_count += 1
             current_stt = global_stt_counter
             global_stt_counter += 1
-            
+           
             row_data = [
                 str(current_stt),
                 title,
@@ -325,45 +351,36 @@ def scrape_data():
                 str(data["views"]),
                 str(page)
             ]
-            
-            # ────────────────────────────────────────────────
-            # Logic mới: Chỉ check tin mới ở trang 1
-            # Chỉ gửi Telegram nếu CẢ title VÀ link đều KHÔNG trùng
-            # ────────────────────────────────────────────────
+           
             if page == 1:
                 title_exists = title in existing_titles
                 link_exists = link in existing_links
-                
+               
                 if link_exists:
-                    # Link đã tồn tại → tin cũ → update STT/Views/Hidden
                     row_num = link_to_row[link]
                     batch_updates.append({"range": f"A{row_num}", "values": [[str(current_stt)]]})
                     batch_updates.append({"range": f"H{row_num}", "values": [[str(data["views"])]]})
                     batch_updates.append({"range": f"I{row_num}", "values": [[str(page)]]})
                     total_updated += 1
                     log(f"Trang 1 - Update tin cũ (link trùng): {title[:40]}...")
-                
+               
                 elif title_exists:
-                    # Title trùng nhưng link mới → KHÔNG coi là mới, KHÔNG gửi Telegram
-                    # Nhưng vẫn thêm vào sheet như tin mới (vì link khác)
                     new_rows.append(row_data)
                     total_new += 1
                     existing_links.add(link)
-                    existing_titles.add(title)  # Cập nhật set title
+                    existing_titles.add(title)
                     log(f"Trang 1 - Title trùng nhưng link mới (không gửi Tele): {title[:40]}...")
-                
+               
                 else:
-                    # Cả title VÀ link đều không trùng → TIN MỚI → gửi Telegram
                     images = get_images_from_detail(link)
                     send_telegram_with_media(data, images)
                     new_rows.append(row_data)
                     total_new += 1
                     existing_links.add(link)
                     existing_titles.add(title)
-                    log(f"Trang 1 - TIN MỚI (title + link mới) → Gửi Tele: {title[:40]}...")
-            
+                    log(f"Trang 1 - TIN MỚI → Gửi Tele: {title[:40]}...")
+           
             else:
-                # Trang >=2: chỉ update nếu link đã tồn tại (không check title, không gửi Tele)
                 if link in existing_links:
                     row_num = link_to_row[link]
                     batch_updates.append({"range": f"A{row_num}", "values": [[str(current_stt)]]})
@@ -371,47 +388,44 @@ def scrape_data():
                     batch_updates.append({"range": f"I{row_num}", "values": [[str(page)]]})
                     total_updated += 1
                     log(f"Trang {page} - Update tin cũ: {title[:40]}...")
-        
+       
         if page_item_count > 0:
             page_stt_logs.append(
                 f"Trang {page}: {page_item_count} tin, STT từ {page_stt_start} → {global_stt_counter-1}"
             )
         else:
             page_stt_logs.append(f"Trang {page}: Không có tin nào")
-        
+       
         if page_item_count == 0:
             consecutive_empty += 1
         else:
             consecutive_empty = 0
-        
+       
         page += 1
         time.sleep(SLEEP_BETWEEN_PAGES)
-    
+   
     driver.quit()
-    
-    # Log thống kê
+   
     log("=== THỐNG KÊ ĐÁNH STT THEO TỪNG TRANG ===")
     for log_line in page_stt_logs:
         log(log_line)
     log(f"Tổng STT đã đánh: 1 → {global_stt_counter-1}")
-    
-    # Batch update tin cũ
+   
     if batch_updates:
         try:
             worksheet.batch_update(batch_updates)
-            log(f"Đã batch update {len(batch_updates)//3} tin cũ (STT + Views + Hidden)")
+            log(f"Đã batch update {len(batch_updates)//3} tin cũ")
         except Exception as e:
             log(f"Lỗi batch update: {e}")
-    
-    # Append tin mới (chỉ từ trang 1, và đã lọc theo logic title+link)
+   
     if new_rows:
         try:
             worksheet.append_rows(new_rows)
             log(f"Đã thêm {len(new_rows)} tin mới vào sheet")
         except Exception as e:
             log(f"Lỗi append rows: {e}")
-    
-    # Sort lại toàn bộ sheet
+   
+    # Sort lại sheet
     log("Bắt đầu sắp xếp lại toàn bộ sheet...")
     try:
         all_data = worksheet.get_all_values()
@@ -423,17 +437,17 @@ def scrape_data():
             sorted_rows = sorted(
                 data_rows,
                 key=lambda row: (
-                    int(row[8]) if row[8].isdigit() else 999999 if row[8] == "Hidden" else 0,
+                    int(row[8]) if row[8].isdigit() else 999999,
                     int(row[0]) if row[0].isdigit() else 999999
                 )
             )
             worksheet.clear()
             worksheet.append_row(header)
             worksheet.append_rows(sorted_rows)
-            log(f"Đã sort lại {len(sorted_rows)} dòng (Page ↑ → STT ↑)")
+            log(f"Đã sort lại {len(sorted_rows)} dòng")
     except Exception as e:
         log(f"Lỗi khi sort sheet: {e}")
-    
+   
     log(f"Hoàn thành: +{total_new} mới | ↑{total_updated} cập nhật | Tổng STT cuối: {global_stt_counter-1}")
 
 if __name__ == "__main__":
