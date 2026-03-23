@@ -23,11 +23,11 @@ def check_special_lunar_days(current_date):
     """Kiểm tra xem ngày hiện tại có rơi vào mốc báo hay không"""
     messages = []
     
-    # Kiểm tra cho 3 mốc: Hôm nay, 3 ngày trước, 3 ngày sau
-    # Để biết hôm nay có phải là "3 ngày trước" của Rằm hay không, 
-    # ta phải xem "3 ngày nữa" có phải là Rằm không.
+    # Kiểm tra cho 3 mốc: Hôm nay, 1 ngày trước, 3 ngày sau
+    # Để biết hôm nay có phải là "1 ngày trước" của Rằm hay không, 
+    # ta phải xem "1 ngày nữa" có phải là Rằm không.
     
-    # 1. Kiểm tra mốc "Sắp đến" (3 ngày trước)
+    # 1. Kiểm tra mốc "Sắp đến" (1 ngày trước)
     three_days_later = current_date + timedelta(days=1)
     d_l_later, m_l_later = get_lunar_date(three_days_later)
     if d_l_later == 1:
