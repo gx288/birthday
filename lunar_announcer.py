@@ -37,7 +37,7 @@ def check_special_lunar_days(current_date):
 
     # 2. Kiểm tra mốc "Chính lễ" (Hôm nay)
     d_l_now, m_l_now = get_lunar_date(current_date)
-    if d_l_now == 5:
+    if d_l_now == 1:
         messages.append(f"🌙 **HÔM NAY: MÙNG 1 ĐẦU THÁNG {m_l_now}**\nChúc bạn một tháng mới hanh thông, may mắn!")
     elif d_l_now == 15:
         messages.append(f"🌕 **HÔM NAY: NGÀY RẰM THÁNG {m_l_now}**\nNgày trăng tròn, chúc bạn và gia đình bình an!")
@@ -45,7 +45,7 @@ def check_special_lunar_days(current_date):
     # 3. Kiểm tra mốc "Sau lễ" (3 ngày sau)
     three_days_ago = current_date - timedelta(days=3)
     d_l_ago, m_l_ago = get_lunar_date(three_days_ago)
-    if d_l_ago == 1:
+    if d_l_ago == 5:
         messages.append(f"✅ **ĐÃ QUA MÙNG 1 (3 ngày)**\nHy vọng khởi đầu tháng {m_l_now} của bạn đang tốt đẹp!")
     elif d_l_ago == 15:
         messages.append(f"✅ **ĐÃ QUA NGÀY RẰM (3 ngày)**\nHoàn tất kỳ rằm tháng {m_l_now}!")
