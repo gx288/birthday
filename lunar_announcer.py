@@ -28,12 +28,12 @@ def check_special_lunar_days(current_date):
     # ta phải xem "3 ngày nữa" có phải là Rằm không.
     
     # 1. Kiểm tra mốc "Sắp đến" (3 ngày trước)
-    three_days_later = current_date + timedelta(days=3)
+    three_days_later = current_date + timedelta(days=1)
     d_l_later, m_l_later = get_lunar_date(three_days_later)
     if d_l_later == 1:
-        messages.append(f"⏳ **SẮP ĐẾN MÙNG 1** (Còn 3 ngày nữa)\nHôm nay là cuối tháng cũ, chuẩn bị cho tháng mới {m_l_later} nhé!")
+        messages.append(f"⏳ **SẮP ĐẾN MÙNG 1** (Ngày mai)\nHôm nay là cuối tháng cũ, chuẩn bị cho tháng mới {m_l_later} nhé!")
     elif d_l_later == 15:
-        messages.append(f"⏳ **SẮP ĐẾN NGÀY RẰM** (Còn 3 ngày nữa)\nChuẩn bị đồ lễ cho ngày rằm tháng {m_l_later} bạn nhé!")
+        messages.append(f"⏳ **SẮP ĐẾN NGÀY RẰM** (Ngày mai)\nChuẩn bị đồ lễ cho ngày rằm tháng {m_l_later} bạn nhé!")
 
     # 2. Kiểm tra mốc "Chính lễ" (Hôm nay)
     d_l_now, m_l_now = get_lunar_date(current_date)
