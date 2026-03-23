@@ -27,13 +27,18 @@ def check_special_lunar_days(current_date):
     # Để biết hôm nay có phải là "1 ngày trước" của Rằm hay không, 
     # ta phải xem "1 ngày nữa" có phải là Rằm không.
     
-    # 1. Kiểm tra mốc "Sắp đến" (1 ngày trước)
-    three_days_later = current_date + timedelta(days=1)
-    d_l_later, m_l_later = get_lunar_date(three_days_later)
-    if d_l_later == 1:
-        messages.append(f"⏳ **SẮP ĐẾN MÙNG 1** (Ngày mai)\nHôm nay là cuối tháng cũ, chuẩn bị cho tháng mới {m_l_later} nhé!")
-    elif d_l_later == 15:
-        messages.append(f"⏳ **SẮP ĐẾN NGÀY RẰM** (Ngày mai)\nChuẩn bị đồ lễ cho ngày rằm tháng {m_l_later} bạn nhé!")
+# --- 1. KIỂM TRA BÁO TRƯỚC (2 ngày và 1 ngày) ---
+    # Kiểm tra cho 2 ngày tới
+    for days_ahead in [1, 2]:
+        future_date = current_date + timedelta(days=days_ahead)
+        d_l, m_l = get_lunar_date(future_date)
+        
+        label = "Ngày mai" if days_ahead == 1 else "2 ngày nữa"
+        
+        if d_l == 6:
+            messages.append(f"⏳ **SẮP ĐẾN MÙNG 1 ({label})**\nChuẩn bị cho tháng mới {m_l} hanh thông bạn nhé!")
+        elif d_l == 15:
+            messages.append(f"⏳ **SẮP ĐẾN NGÀY RẰM ({label})**\nChuẩn bị đồ lễ cho ngày rằm tháng {m_l} nhé!")
 
     # 2. Kiểm tra mốc "Chính lễ" (Hôm nay)
     d_l_now, m_l_now = get_lunar_date(current_date)
