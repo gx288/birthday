@@ -30,7 +30,7 @@ def check_special_lunar_days(current_date):
     # 1. Kiểm tra mốc "Sắp đến" (1 ngày trước)
     three_days_later = current_date + timedelta(days=1)
     d_l_later, m_l_later = get_lunar_date(three_days_later)
-    if d_l_later == 6:
+    if d_l_later == 1:
         messages.append(f"⏳ **SẮP ĐẾN MÙNG 1** (Ngày mai)\nHôm nay là cuối tháng cũ, chuẩn bị cho tháng mới {m_l_later} nhé!")
     elif d_l_later == 15:
         messages.append(f"⏳ **SẮP ĐẾN NGÀY RẰM** (Ngày mai)\nChuẩn bị đồ lễ cho ngày rằm tháng {m_l_later} bạn nhé!")
