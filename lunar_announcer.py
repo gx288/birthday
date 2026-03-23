@@ -35,7 +35,7 @@ def check_special_lunar_days(current_date):
         
         label = "Ngày mai" if days_ahead == 1 else "2 ngày nữa"
         
-        if d_l == 7:
+        if d_l == 1:
             messages.append(f"⏳ **SẮP ĐẾN MÙNG 1 ({label})**\nChuẩn bị cho tháng mới {m_l} hanh thông bạn nhé!")
         elif d_l == 15:
             messages.append(f"⏳ **SẮP ĐẾN NGÀY RẰM ({label})**\nChuẩn bị đồ lễ cho ngày rằm tháng {m_l} nhé!")
