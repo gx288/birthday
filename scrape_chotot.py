@@ -111,14 +111,11 @@ def send_telegram_album(item, images):
 
 def extract_from_card(card_el):
     try:
-        # Link trước tiên để filter ad thật
-        try:
-            a = card_el.find_element(By.CSS_SELECTOR, 'a[href*="/mua-ban-nhac-cu/"][href$=".htm"]')
-            link = a.get_attribute("href")
-            if '/tags/' in link:
-                return None
-        except:
+        link = card_el.get_attribute("href")
+        if not link or '/tags/' in link:
             return None
+    except:
+        return None
 
         data = {
             "title": "Không tiêu đề",
@@ -202,8 +199,8 @@ def scrape():
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         scroll_to_bottom(driver)
 
-        # Tìm cards với link ad thật làm con
-        card_elements = driver.find_elements(By.XPATH, "//*[.//a[contains(@href, '/mua-ban-nhac-cu/') and contains(@href, '.htm') and not(contains(@href, '/tags/'))]]")
+        # Tìm trực tiếp thẻ <a> chứa link ad thật
+        card_elements = driver.find_elements(By.XPATH, "//a[contains(@href, '/mua-ban-') and contains(@href, '.htm') and not(contains(@href, '/tags/'))]")
         log(f"Trang {page}: Tìm thấy {len(card_elements)} cards (có link ad thật)")
 
         debug_printed = False
