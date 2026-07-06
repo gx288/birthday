@@ -72,7 +72,7 @@ def connect_google_sheet():
         ws = sh.add_worksheet(title=SHEET_NAME, rows=2000, cols=len(HEADERS))
         ws.append_row(HEADERS)
     if ws.row_values(1) != HEADERS:
-        ws.update("A1", [HEADERS])
+        ws.update(range_name="A1", values=[HEADERS])
     return ws
 
 def get_images_from_detail(driver, link):
@@ -259,19 +259,23 @@ def scrape():
         for a_tag in a_tags:
             try:
                 card = a_tag.find_element(By.XPATH, "..")
+                raw_href = a_tag.get_attribute("href")
             except:
                 continue
                 
             text = card.text.strip()
             if len(text) < 50:
+                # log(f"Skip card rác (quá ngắn): {raw_href}")
                 continue  # skip card rác
 
             data = extract_from_card(card)
             if not data:
+                log(f"Trích xuất thất bại (Bị filter): {raw_href}")
                 continue
 
             link = data["link"]
             if link in existing_links:
+                log(f"Bỏ qua tin cũ (Đã có trong Sheet): {link}")
                 continue
 
             # Sử dụng Selenium lấy ảnh để chống block
