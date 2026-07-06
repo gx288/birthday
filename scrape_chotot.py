@@ -177,7 +177,24 @@ def extract_from_card(card_el):
                 data["title"] = line
                 break
 
-        if len(data["title"]) < 5 or not data["link"]:
+        # Filter out injected ads (Gợi ý, Tin nổi bật, Tin hết hạn) and wrong categories
+        bad_titles = ["tin hết hạn", "tin nổi bật", "gợi ý", "tự động", "không tiêu đề"]
+        if any(b in data["title"].lower() for b in bad_titles) or len(data["title"]) < 5:
+            return None
+            
+        if not data["link"]:
+            return None
+            
+        # Filter domains and locations
+        link_lower = data["link"].lower()
+        if "nhatot.com" in link_lower or "xe.chotot.com" in link_lower:
+            return None
+        if "ha-noi" not in link_lower:
+            return None
+            
+        # Filter obvious wrong categories that might appear in suggestions
+        bad_categories = ["dien-thoai", "may-tinh", "laptop", "tivi", "tu-lanh", "may-giat", "dieu-hoa", "oto", "xe-may", "xe-dap", "thu-cung", "thoi-trang", "viec-lam", "dong-ho"]
+        if any(c in link_lower for c in bad_categories):
             return None
 
         return data
