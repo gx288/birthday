@@ -10,7 +10,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from datetime import datetime
+from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
 BASE_URL = "https://www.chotot.com"
@@ -20,7 +20,7 @@ SHEET_NAME = "Chợ tốt"
 MAX_PAGES = 12
 SLEEP_BETWEEN_PAGES = random.uniform(6, 12)
 
-HEADERS = ["STT", "Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Hidden"]
+HEADERS = ["STT", "Title", "Price", "Link", "Time Posted", "Location", "Seller", "Views", "Hidden", "Scan Time"]
 
 def log(message):
     now = datetime.now().strftime("%H:%M:%S")
@@ -202,6 +202,31 @@ def extract_from_card(card_el):
         log(f"Lỗi trích xuất card: {e}")
         return None
 
+def calculate_post_time(relative_time):
+    now = datetime.now()
+    try:
+        if "phút trước" in relative_time:
+            val = int(''.join(filter(str.isdigit, relative_time)))
+            return (now - timedelta(minutes=val)).strftime("%Y-%m-%d %H:%M")
+        elif "giờ trước" in relative_time:
+            val = int(''.join(filter(str.isdigit, relative_time)))
+            return (now - timedelta(hours=val)).strftime("%Y-%m-%d %H:%M")
+        elif "ngày trước" in relative_time:
+            val = int(''.join(filter(str.isdigit, relative_time)))
+            return (now - timedelta(days=val)).strftime("%Y-%m-%d %H:%M")
+        elif "hôm qua" in relative_time.lower():
+            return (now - timedelta(days=1)).strftime("%Y-%m-%d %H:%M")
+        elif "tuần trước" in relative_time:
+            val = int(''.join(filter(str.isdigit, relative_time)))
+            return (now - timedelta(days=val*7)).strftime("%Y-%m-%d %H:%M")
+        elif "tháng trước" in relative_time:
+            val = int(''.join(filter(str.isdigit, relative_time)))
+            return (now - timedelta(days=val*30)).strftime("%Y-%m-%d %H:%M")
+        else:
+            return relative_time
+    except:
+        return relative_time
+
 def scrape():
     log("🚀 BẮT ĐẦU QUÉT CHỢ TỐT - Nhạc cụ Hà Nội ≤ 2.1tr")
     ws = connect_google_sheet()
@@ -255,8 +280,11 @@ def scrape():
             # Gửi Tele (dù có ảnh hay không có ảnh vẫn gửi text)
             send_telegram_album(data, images)
 
+            scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            abs_time = calculate_post_time(data["time"])
+            
             stt = len(existing_links) + new_count + 1
-            row = [str(stt), data["title"], data["price"], link, data["time"], data["location"], data["seller"], str(data["views"]), ""]
+            row = [str(stt), data["title"], data["price"], link, abs_time, data["location"], data["seller"], str(data["views"]), "", scan_time]
             new_rows.append(row)
             existing_links.add(link)
             new_count += 1
