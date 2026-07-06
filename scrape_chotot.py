@@ -217,6 +217,7 @@ def scrape():
     driver = setup_driver()
     new_count = 0
     page = 1
+    new_rows = []
 
     while page <= MAX_PAGES:
         url = START_URL if page == 1 else f"{START_URL}&page={page}"
@@ -256,7 +257,7 @@ def scrape():
 
             stt = len(existing_links) + new_count + 1
             row = [str(stt), data["title"], data["price"], link, data["time"], data["location"], data["seller"], str(data["views"]), ""]
-            ws.append_row(row)
+            new_rows.append(row)
             existing_links.add(link)
             new_count += 1
             processed += 1
@@ -272,6 +273,14 @@ def scrape():
         time.sleep(SLEEP_BETWEEN_PAGES)
 
     driver.quit()
+    
+    if new_rows:
+        try:
+            ws.insert_rows(new_rows, 2)
+            log(f"Đã ghi {len(new_rows)} dòng mới lên đầu file Google Sheet.")
+        except Exception as e:
+            log(f"Lỗi khi ghi vào Google Sheet: {e}")
+            
     log(f"Hoàn thành: +{new_count} tin mới")
 
 if __name__ == "__main__":
