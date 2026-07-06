@@ -75,10 +75,14 @@ def connect_google_sheet():
         ws.update("A1", [HEADERS])
     return ws
 
-def get_images_from_detail(link):
+def get_images_from_detail(driver, link):
     try:
-        r = requests.get(link, headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
-        soup = BeautifulSoup(r.text, "html.parser")
+        # Sử dụng Selenium để mở link chi tiết ở tab mới nhằm vượt Cloudflare
+        driver.execute_script(f"window.open('{link}', '_blank');")
+        driver.switch_to.window(driver.window_handles[-1])
+        time.sleep(4)
+        
+        soup = BeautifulSoup(driver.page_source, "html.parser")
         images = []
         for script in soup.find_all("script", type="application/ld+json"):
             try:
@@ -91,17 +95,43 @@ def get_images_from_detail(link):
                         images.extend([i for i in img if "cdn.chotot.com" in i])
             except:
                 pass
+                
+        # Fallback tìm img tags nếu không có ld+json
+        if not images:
+            for img in soup.find_all("img"):
+                src = img.get("src", "")
+                if "cdn.chotot.com" in src and "ad" in src:
+                    images.append(src)
+                    
+        driver.close()
+        driver.switch_to.window(driver.window_handles[0])
         return list(set(images))[:6]
     except Exception as e:
-        log(f"Lỗi lấy ảnh: {e}")
+        log(f"Lỗi lấy ảnh bằng Selenium: {e}")
+        try:
+            driver.close()
+            driver.switch_to.window(driver.window_handles[0])
+        except:
+            pass
         return []
 
 def send_telegram_album(item, images):
     cfg = get_telegram_config()
-    if not cfg["token"] or not cfg["chat_id"] or not images:
-        log("Skip gửi Tele: thiếu config hoặc ảnh")
+    if not cfg["token"] or not cfg["chat_id"]:
+        log("Skip gửi Tele: thiếu config")
         return
+        
     caption = f"🎸 <b>HÀNG MỚI - CHỢ TỐT</b>\n\n<b>{item['title']}</b>\n💰 <b>{item['price']}</b>\n👤 {item['seller']}\n👀 {item['views']} views\n📍 {item['location']}\n⏰ {item['time']}\n\n<a href='{item['link']}'>🔗 Xem chi tiết</a>"
+    
+    if not images:
+        # Nếu vẫn không có ảnh, gửi tin nhắn text thường
+        try:
+            requests.post(f"https://api.telegram.org/bot{cfg['token']}/sendMessage", json={"chat_id": cfg["chat_id"], "text": caption, "parse_mode": "HTML", "disable_web_page_preview": False})
+            log(f"Đã gửi TEXT message cho tin: {item['title']}")
+        except Exception as e:
+            log(f"Lỗi gửi Tele text: {e}")
+        return
+
     media = [{"type": "photo", "media": url, "caption": caption if idx == 0 else "", "parse_mode": "HTML"} for idx, url in enumerate(images)]
     try:
         requests.post(f"https://api.telegram.org/bot{cfg['token']}/sendMediaGroup", json={"chat_id": cfg["chat_id"], "media": media})
@@ -111,11 +141,16 @@ def send_telegram_album(item, images):
 
 def extract_from_card(card_el):
     try:
-        link = card_el.get_attribute("href")
-        if not link or '/tags/' in link:
+        try:
+            a_el = card_el.find_element(By.XPATH, ".//a[contains(@href, '/mua-ban-') and contains(@href, '.htm')]")
+            link = a_el.get_attribute("href")
+            if not link or '/tags/' in link:
+                return None
+        except:
             return None
-    except:
-        return None
+
+        lines = card_el.text.strip().split('\n')
+        lines = [l.strip() for l in lines if l.strip()]
 
         data = {
             "title": "Không tiêu đề",
@@ -127,53 +162,27 @@ def extract_from_card(card_el):
             "views": 0
         }
 
-        # Title: ưu tiên h3/h4/strong/a text
-        try:
-            title_el = card_el.find_element(By.CSS_SELECTOR, 'h3, h4, strong, [class*="title"], [class*="name"], a')
-            data["title"] = title_el.text.strip()
-        except:
-            pass
+        for line in lines:
+            if ('đ' in line or 'triệu' in line or 'Thỏa thuận' in line) and any(c.isdigit() for c in line):
+                if data["price"] == "Thỏa thuận": data["price"] = line
+            elif ('trước' in line or 'ngày' in line or 'giờ' in line or 'hôm qua' in line or 'tháng' in line):
+                if data["time"] == "N/A": data["time"] = line
+            elif ('Quận' in line or 'Huyện' in line or 'Q.' in line or '(P.' in line or 'TP.' in line):
+                if data["location"] == "Hà Nội": data["location"] = line
+            elif ('đã bán' in line or 'lượt xem' in line):
+                data["seller"] = line
 
-        # Price
-        try:
-            price_el = card_el.find_element(By.XPATH, ".//span | .//div | .//strong[contains(., '₫') or contains(., 'triệu') or contains(., 'đ') or contains(., 'Thỏa thuận')]")
-            data["price"] = price_el.text.strip()
-        except:
-            pass
-
-        # Time
-        try:
-            time_el = card_el.find_element(By.XPATH, ".//span[contains(., 'trước') or contains(., 'ngày') or contains(., 'giờ') or contains(., 'hôm qua') or contains(., 'tháng')]")
-            data["time"] = time_el.text.strip()
-        except:
-            pass
-
-        # Location
-        try:
-            loc_el = card_el.find_element(By.XPATH, ".//span[contains(., 'Quận') or contains(., 'Huyện') or contains(., '(P.') or contains(., 'TP.') or contains(@class, 'location')]")
-            data["location"] = loc_el.text.strip()
-        except:
-            pass
-
-        # Seller
-        try:
-            seller_el = card_el.find_element(By.XPATH, ".//span[contains(., 'đã bán') or contains(., 'lượt xem') or contains(@class, 'seller') or contains(@class, 'name')]")
-            data["seller"] = seller_el.text.strip()
-        except:
-            pass
-
-        # Views (nếu có)
-        try:
-            views_text = card_el.find_element(By.XPATH, ".//span[contains(., 'lượt xem')]").text
-            data["views"] = int(''.join(c for c in views_text if c.isdigit()))
-        except:
-            pass
+        for line in lines:
+            if line not in [data["price"], data["time"], data["location"], data["seller"]] and not line.isdigit() and len(line) > 5 and "sử dụng" not in line.lower() and "mới" != line.lower() and line != "Guitar" and line != "Organ":
+                data["title"] = line
+                break
 
         if len(data["title"]) < 5 or not data["link"]:
             return None
 
         return data
-    except:
+    except Exception as e:
+        log(f"Lỗi trích xuất card: {e}")
         return None
 
 def scrape():
@@ -199,22 +208,20 @@ def scrape():
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         scroll_to_bottom(driver)
 
-        # Tìm trực tiếp thẻ <a> chứa link ad thật
-        card_elements = driver.find_elements(By.XPATH, "//a[contains(@href, '/mua-ban-') and contains(@href, '.htm') and not(contains(@href, '/tags/'))]")
-        log(f"Trang {page}: Tìm thấy {len(card_elements)} cards (có link ad thật)")
+        # Lấy trực tiếp các thẻ a, rồi từ đó truy ngược ra thẻ cha li/div bọc ngoài
+        a_tags = driver.find_elements(By.XPATH, "//a[contains(@href, '/mua-ban-') and contains(@href, '.htm') and not(contains(@href, '/tags/'))]")
+        log(f"Trang {page}: Tìm thấy {len(a_tags)} cards (có link ad thật)")
 
-        debug_printed = False
         processed = 0
-        for card in card_elements:
+        for a_tag in a_tags:
+            try:
+                card = a_tag.find_element(By.XPATH, "..")
+            except:
+                continue
+                
             text = card.text.strip()
             if len(text) < 50:
                 continue  # skip card rác
-
-            # Debug: in text của 2-3 card đầu có nội dung
-            if not debug_printed and processed < 3:
-                log(f"DEBUG text card {processed+1} (cấu trúc thực tế):")
-                print(text[:800])  # in 800 ký tự đầu
-                debug_printed = True
 
             data = extract_from_card(card)
             if not data:
@@ -224,11 +231,11 @@ def scrape():
             if link in existing_links:
                 continue
 
-            images = get_images_from_detail(link)
-            if images:
-                send_telegram_album(data, images)
-            else:
-                log(f"Tin mới không có ảnh: {data['title']}")
+            # Sử dụng Selenium lấy ảnh để chống block
+            images = get_images_from_detail(driver, link)
+            
+            # Gửi Tele (dù có ảnh hay không có ảnh vẫn gửi text)
+            send_telegram_album(data, images)
 
             stt = len(existing_links) + new_count + 1
             row = [str(stt), data["title"], data["price"], link, data["time"], data["location"], data["seller"], str(data["views"]), ""]
@@ -241,8 +248,11 @@ def scrape():
         log(f"Trang {page}: Xử lý thành công {processed} tin mới")
 
         if processed == 0:
-            log("Không extract được tin nào → kiểm tra DEBUG text ở trên để fix XPath/CSS.")
-            break
+            log("Không có tin mới trên trang này hoặc đã quét hết.")
+            # Chú ý: bỏ lệnh break ở đây nếu muốn vẫn lật qua page 2, 3...
+            # Break chỉ dùng khi chắc chắn page không render được gì
+            if len(a_tags) == 0:
+                break
 
         page += 1
         time.sleep(SLEEP_BETWEEN_PAGES)
