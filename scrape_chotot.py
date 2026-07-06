@@ -121,7 +121,7 @@ def send_telegram_album(item, images):
         log("Skip gửi Tele: thiếu config")
         return
         
-    caption = f"🎸 <b>HÀNG MỚI - CHỢ TỐT</b>\n\n<b>{item['title']}</b>\n💰 <b>{item['price']}</b>\n👤 {item['seller']}\n👀 {item['views']} views\n📍 {item['location']}\n⏰ {item['time']}\n\n<a href='{item['link']}'>🔗 Xem chi tiết</a>"
+    caption = f"🎸 <b>{item['title']}</b>\n💰 {item['price']}\n📍 {item['location']}\n🔗 <a href='{item['link']}'>Xem chi tiết</a>"
     
     if not images:
         # Nếu vẫn không có ảnh, gửi tin nhắn text thường
@@ -265,11 +265,8 @@ def scrape():
         log(f"Trang {page}: Xử lý thành công {processed} tin mới")
 
         if processed == 0:
-            log("Không có tin mới trên trang này hoặc đã quét hết.")
-            # Chú ý: bỏ lệnh break ở đây nếu muốn vẫn lật qua page 2, 3...
-            # Break chỉ dùng khi chắc chắn page không render được gì
-            if len(a_tags) == 0:
-                break
+            log("Không có tin mới trên trang này. Tạm dừng để tiết kiệm thời gian.")
+            break
 
         page += 1
         time.sleep(SLEEP_BETWEEN_PAGES)
