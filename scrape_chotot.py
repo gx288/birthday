@@ -232,15 +232,23 @@ def calculate_post_time(relative_time):
     except:
         return relative_time
 
+import re
+
+def get_item_id(link):
+    match = re.search(r'/(\d+)\.htm', link)
+    if match:
+        return match.group(1)
+    return link
+
 def scrape():
     log("🚀 BẮT ĐẦU QUÉT CHỢ TỐT - Nhạc cụ Hà Nội ≤ 2.1tr")
     ws = connect_google_sheet()
 
-    existing_links = set()
+    existing_ids = set()
     try:
         data_old = ws.get_all_values()[1:]
-        existing_links = {row[3].strip() for row in data_old if len(row) > 3 and row[3].strip()}
-        log(f"Đọc {len(existing_links)} link cũ từ sheet")
+        existing_ids = {get_item_id(row[3].strip()) for row in data_old if len(row) > 3 and row[3].strip()}
+        log(f"Đọc {len(existing_ids)} ID cũ từ sheet")
     except:
         pass
 
@@ -279,7 +287,8 @@ def scrape():
                 continue
 
             link = data["link"]
-            if link in existing_links:
+            item_id = get_item_id(link)
+            if item_id in existing_ids:
                 log(f"Bỏ qua tin cũ (Đã có trong Sheet): {link}")
                 continue
 
@@ -292,10 +301,10 @@ def scrape():
             scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             abs_time = calculate_post_time(data["time"])
             
-            stt = len(existing_links) + new_count + 1
+            stt = len(existing_ids) + new_count + 1
             row = [str(stt), data["title"], data["price"], link, abs_time, data["location"], data["seller"], str(data["views"]), "", scan_time]
             new_rows.append(row)
-            existing_links.add(link)
+            existing_ids.add(item_id)
             new_count += 1
             processed += 1
             log(f"TIN MỚI → {data['title']} | {data['price']} | {link}")
